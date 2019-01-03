@@ -1,0 +1,2 @@
+(defun foo(x y) (+ x y))
+(let ((this 1) (is 2) (a 3) (test 4)) this is (foo a test))

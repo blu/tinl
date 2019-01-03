@@ -1,2 +1,1 @@
-(+ 1 2 3)
-42
+(let ((this 1) (is 2) (a 3) (test 4)) this is a test)
