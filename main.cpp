@@ -15,6 +15,7 @@
 const char* keywords[] = { // keep order in sync with Token enum below to maintain a mapping shortcut
 	"(",
 	")",
+	"defun",
 	"let",
 	"+",
 	"-",
@@ -35,6 +36,7 @@ enum Token : uint16_t { // keep order in sync with keywords above to maintain a 
 	TOKEN_UNKNOWN,
 	TOKEN_PARENTHESIS_L,
 	TOKEN_PARENTHESIS_R,
+	TOKEN_DEFUN,
 	TOKEN_LET,
 	TOKEN_PLUS,
 	TOKEN_MINUS,
@@ -54,6 +56,8 @@ const char* stringFromToken(const Token t)
 		return "TOKEN_PARENTHESIS_L";
 	case TOKEN_PARENTHESIS_R:
 		return "TOKEN_PARENTHESIS_R";
+	case TOKEN_DEFUN:
+		return "TOKEN_DEFUN";
 	case TOKEN_LET:
 		return "TOKEN_LET";
 	case TOKEN_PLUS:
@@ -367,7 +371,7 @@ bool tokenize(
 	return true;
 }
 
-// Abstract Syntax Tree (AST) per function definition;
+// Abstract Syntax Tree (AST)
 // kinds of AST nodes
 enum ASTNodeType : uint16_t {
 	ASTNODE_NONE,
@@ -378,6 +382,9 @@ enum ASTNodeType : uint16_t {
 	ASTNODE_LITERAL_I32, // integral literal expression
 	ASTNODE_LITERAL_F32  // floating-point literal expression
 };
+// note: DEFUN does not have a dedicted node type; instead we re-purpose a LET node into a statement that is a
+// nop for linear execution, but introduces a LET scope of initialized-from-args named vars when branched to; we
+// differentiate LET expressions from DEFUN statements by the fact the latter are named while the former are not
 
 const char* stringFromNodeType(const ASTNodeType t)
 {
@@ -416,7 +423,7 @@ struct ASTNode {
 		int32_t literal_i32; // value of integral literal
 		float   literal_f32; // value of floating-point literal
 	};
-	ASTNodeType    type;     // type of node
+	ASTNodeType    type;     // semantical type of node
 	ASTNodeIndex   parent;   // parent index
 	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
 
@@ -425,12 +432,20 @@ struct ASTNode {
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
 {
+	assert(name.ptr && name.len || !name.ptr && !name.len);
+
 	for (size_t i = 0; i < depth; ++i)
 		fprintf(f, "  ");
 
 	const char* const stringType = stringFromNodeType(type);
 
 	switch (type) {
+	case ASTNODE_LET:
+		if (name.ptr)
+			fprintf(f, "%s: %.*s\n", stringType, name.len, name.ptr);
+		else
+			fprintf(f, "%s\n", stringType);
+		break;
 	case ASTNODE_INIT:
 	case ASTNODE_EVAL_VAR:
 	case ASTNODE_EVAL_FUN:
@@ -453,13 +468,13 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 
 typedef std::vector<ASTNode> ASTNodes;
 
-// get the leading sub-span of matching left and right parenthesis in a stream span
+// get the leading sub-span of matching left and right parenthesis in a token-stream span
 size_t getMatchingParentheses(
 	const std::vector<TokenInStream>& tokens,
 	const size_t start,
 	const size_t len)
 {
-	assert(len);
+	assert(1 < len);
 	assert(start + len <= tokens.size());
 	assert(TOKEN_PARENTHESIS_L == tokens[start].token);
 
@@ -487,7 +502,7 @@ size_t getNode(
 	const ASTNodeIndex parent,
 	ASTNodes& tree);
 
-// get the leading 'let' AST node in a stream span; return number of tokens encompassed; -1 if error
+// get the leading 'let' AST node in a token-stream span; return number of tokens encompassed; -1 if error
 size_t getNodeLet(
 	const std::vector<TokenInStream>& tokens,
 	const size_t start,
@@ -498,7 +513,6 @@ size_t getNodeLet(
 	assert(len);
 	assert(start + len <= tokens.size());
 	assert(TOKEN_PARENTHESIS_L == tokens[start].token);
-	assert(nullidx != parent && parent < tree.size());
 
 	const size_t span = getMatchingParentheses(tokens, start, len);
 
@@ -568,6 +582,69 @@ size_t getNodeLet(
 	return span;
 }
 
+// get the leading 'defun' AST node in a token-stream span; return number of tokens encompassed; -1 if error
+size_t getNodeDefun(
+	const std::vector<TokenInStream>& tokens,
+	const size_t start,
+	const size_t len,
+	const ASTNodeIndex parent,
+	ASTNodes& tree)
+{
+	assert(1 < len);
+	assert(start + len <= tokens.size());
+	assert(TOKEN_IDENTIFIER == tokens[start].token);
+
+	if (TOKEN_PARENTHESIS_L != tokens[start + 1].token) {
+		fprintf(stderr, "invalid defun at line %d, column %d\n",
+			tokens[start].row,
+			tokens[start].col);
+		return size_t(-1);
+	}
+
+	size_t start_it = start + 1; // account for identifier
+	size_t span_it = len - 1;
+
+	const size_t span = getMatchingParentheses(tokens, start_it, span_it);
+
+	// check for stray left parenthesis
+	if (size_t(-1) == span) {
+		fprintf(stderr, "invalid defun at line %d, column %d\n",
+			tokens[start_it].row,
+			tokens[start_it].col);
+		return size_t(-1);
+	}
+
+	start_it++; // account for left parenthesis
+	span_it = span - 2; // account for both parentheses
+
+	// introduce named variables but don't initialize those
+	while (span_it) {
+		// check basic prerequisites of 'defun' version of 'init' expression: x
+		if (TOKEN_IDENTIFIER != tokens[start_it].token) {
+			fprintf(stderr, "invalid defun-arg at line %d, column %d\n",
+				tokens[start_it].row,
+				tokens[start_it].col);
+			return size_t(-1);
+		}
+
+		ASTNode newnode;
+		newnode.name.ptr = tokens[start_it].loc;
+		newnode.name.len = tokens[start_it].len;
+		newnode.type = ASTNODE_INIT;
+		newnode.parent = parent;
+
+		const ASTNodeIndex newnodeIdx = tree.size();
+		tree.push_back(newnode);
+		tree[parent].args.push_back(newnodeIdx);
+
+		// account for identifier token itself
+		start_it++;
+		span_it--;
+	}
+
+	return span + 1; // account for identifier
+}
+
 // return the index of the 'init' statement of a named var; -1 if not found
 ASTNodeIndex checkKnownVar(
 	const char* name,
@@ -594,7 +671,7 @@ ASTNodeIndex checkKnownVar(
 	return checkKnownVar(name, len, tree[parent].parent, tree);
 }
 
-// get the leading AST node in a stream span; return number of tokens encompassed; -1 if error
+// get the leading AST node in a token-stream span; return number of tokens encompassed; -1 if error
 size_t getNode(
 	const std::vector<TokenInStream>& tokens,
 	const size_t start,
@@ -602,7 +679,9 @@ size_t getNode(
 	const ASTNodeIndex parent,
 	ASTNodes& tree)
 {
-	assert(nullidx == parent || parent < tree.size());
+	assert(len);
+	assert(start + len <= tokens.size());
+	assert(nullidx != parent && parent < tree.size());
 
 	// check for stray right parenthesis
 	if (TOKEN_PARENTHESIS_R == tokens[start].token) {
@@ -640,30 +719,61 @@ size_t getNode(
 
 		switch (tokens[start_it].token) {
 			size_t subspan;
+		case TOKEN_DEFUN:
+			// check basic prerequisites of 'defun' statement: defun f() expr
+			if (5 > span_it || TOKEN_IDENTIFIER != tokens[start_it + 1].token) {
+				fprintf(stderr, "invalid defun at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+
+			// account for keyword token itself
+			start_it++;
+			span_it--;
+
+			// node introduces a named scope
+			newnode.name.ptr = tokens[start_it].loc;
+			newnode.name.len = tokens[start_it].len;
+			newnode.type = ASTNODE_LET;
+			newnode.parent = parent;
+
+			tree.push_back(newnode);
+			tree[parent].args.push_back(newnodeIdx);
+
+			// introduce named args into their dedicated scope
+			subspan = getNodeDefun(tokens, start_it, span_it, newnodeIdx, tree);
+
+			if (size_t(-1) == subspan)
+				return size_t(-1);
+
+			start_it += subspan;
+			span_it -= subspan;
+			break;
+
 		case TOKEN_LET:
-			// check basic prerequisites of 'let' expression: let ((x expr))
-			if (7 > span_it || TOKEN_PARENTHESIS_L != tokens[start_it + 1].token) {
+			// check basic prerequisites of 'let' expression: let ((x expr)) expr
+			if (8 > span_it || TOKEN_PARENTHESIS_L != tokens[start_it + 1].token) {
 				fprintf(stderr, "invalid let at line %d, column %d\n",
 					tokens[start].row,
 					tokens[start].col);
 				return size_t(-1);
 			}
 
+			// node introduces an anonymous scope
 			newnode.name.ptr = nullptr;
 			newnode.name.len = 0;
 			newnode.type = ASTNODE_LET;
 			newnode.parent = parent;
 
 			tree.push_back(newnode);
-
-			if (nullidx != parent)
-				tree[parent].args.push_back(newnodeIdx);
+			tree[parent].args.push_back(newnodeIdx);
 
 			// account for keyword token itself
 			start_it++;
 			span_it--;
 
-			// introduce named vars and their dedicated scope
+			// introduce named vars into their dedicated scope
 			subspan = getNodeLet(tokens, start_it, span_it, newnodeIdx, tree);
 
 			if (size_t(-1) == subspan)
@@ -685,9 +795,7 @@ size_t getNode(
 			newnode.parent = parent;
 
 			tree.push_back(newnode);
-
-			if (nullidx != parent)
-				tree[parent].args.push_back(newnodeIdx);
+			tree[parent].args.push_back(newnodeIdx);
 
 			// account for keyword/identifier token itself
 			start_it++;
@@ -698,7 +806,7 @@ size_t getNode(
 			return size_t(-1);
 		}
 
-		// check for an expression sequence
+		// check for a sub-expression sequence
 		while (span_it) {
 			const size_t subspan = getNode(tokens, start_it, span_it, newnodeIdx, tree);
 
@@ -709,6 +817,7 @@ size_t getNode(
 			span_it -= subspan;
 		}
 
+		// TODO: verify correct number of sub-expressions for the given expression
 		return span;
 	}
 
@@ -749,9 +858,7 @@ size_t getNode(
 	}
 
 	tree.push_back(newnode);
-
-	if (nullidx != parent)
-		tree[parent].args.push_back(newnodeIdx);
+	tree[parent].args.push_back(newnodeIdx);
 
 	return 1;
 }
