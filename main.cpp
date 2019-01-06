@@ -524,6 +524,39 @@ size_t getMatchingParentheses(
 	return size_t(-1);
 }
 
+// get the number of sub-expressions or init statements to a given AST node; return init count if countInit is true, sub-expression count otherwise
+size_t getSubCount(
+	const bool countInit,
+	const ASTNodeIndex parent,
+	const ASTNodes& tree)
+{
+	assert(nullidx != parent && parent < tree.size());
+	const ASTNode& node = tree[parent];
+	assert(!countInit || ASTNODE_LET == node.type);
+
+	ASTNodeIndices::const_iterator it = node.args.begin();
+
+	// count leading 'init' statements
+	for (; it != node.args.end(); ++it)
+		if (ASTNODE_INIT != tree[*it].type)
+			break;
+
+	if (countInit)
+		return it - node.args.begin();
+
+	// count trailing sub-expressions
+	size_t ret = 0;
+	for (; it != node.args.end(); ++it) {
+		// ignore 'defun' statements, i.e. named 'let' sub-nodes
+		if (ASTNODE_LET == tree[*it].type && tree[*it].name.ptr)
+			continue;
+
+		ret++;
+	}
+
+	return ret;
+}
+
 size_t getNode(
 	const std::vector<TokenInStream>& tokens,
 	const size_t start,
@@ -686,6 +719,9 @@ ASTNodeIndex checkKnownVar(
 	const ASTNodeIndex parent,
 	const ASTNodes& tree)
 {
+	assert(name);
+	assert(len);
+
 	if (nullidx == parent)
 		return nullidx;
 
@@ -703,6 +739,68 @@ ASTNodeIndex checkKnownVar(
 	}
 
 	return checkKnownVar(name, len, tree[parent].parent, tree);
+}
+
+ASTNodeIndex checkKnownDefun(
+	const char* name,
+	const size_t len,
+	const ASTNodeIndex parent,
+	const ASTNodes& tree)
+{
+	assert(name);
+	assert(len);
+
+	if (nullidx == parent)
+		return nullidx;
+
+	assert(parent < tree.size());
+
+	// check all prent and grand-parent let-expressions and defun-statements, as well as the dummy root node
+	if (ASTNODE_LET == tree[parent].type || ASTNODE_NONE == tree[parent].type) {
+		if (len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name, len)) {
+			return parent;
+		}
+		// check all defun-sub-nodes of this (grand) parent
+		for (ASTNodeIndices::const_iterator it = tree[parent].args.begin(); it != tree[parent].args.end(); ++it) {
+			if (ASTNODE_LET != tree[*it].type)
+				continue;
+
+			if (tree[*it].name.len == len && 0 == strncmp(tree[*it].name.ptr, name, len))
+				return *it;
+		}
+	}
+
+	return checkKnownDefun(name, len, tree[parent].parent, tree);
+}
+
+// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count
+// if no such known function, return max ssize_t
+ssize_t getMinFunArgs(
+	const ASTNodeIndex parent,
+	const ASTNodes& tree)
+{
+	assert(nullidx != parent && parent < tree.size());
+	const ASTNode& node = tree[parent];
+	assert(ASTNODE_EVAL_FUN == node.type);
+
+	// check built-in functions; at a match a minimum number of args is returned -- a negative ssize_t
+	if (1 == node.name.len) {
+		if (0 == strncmp("+", node.name.ptr, 1))
+			return -2;
+		if (0 == strncmp("-", node.name.ptr, 1))
+			return -2;
+		if (0 == strncmp("*", node.name.ptr, 1))
+			return -2;
+		if (0 == strncmp("/", node.name.ptr, 1))
+			return -2;
+	}
+
+	// check the upper tree for a matching defun; at a match an exact number of args is returned -- a positive ssize_t
+	const ASTNodeIndex defunIdx = checkKnownDefun(node.name.ptr, node.name.len, node.parent, tree);
+	if (nullidx != defunIdx)
+		return getSubCount(true, defunIdx, tree);
+
+	return size_t(-1) >> 1;
 }
 
 // get the leading AST node in a token-stream span; return number of tokens encompassed; -1 if error
@@ -824,7 +922,7 @@ size_t getNode(
 		case TOKEN_MINUS:
 		case TOKEN_MUL:
 		case TOKEN_DIV:
-		case TOKEN_IDENTIFIER: // TODO: check against known function identifiers
+		case TOKEN_IDENTIFIER:
 			newnode.name.ptr = tokens[start_it].loc;
 			newnode.name.len = tokens[start_it].len;
 			newnode.retType = ASTRETURN_UNKNOWN;
@@ -854,7 +952,44 @@ size_t getNode(
 			span_it -= subspan;
 		}
 
-		// TODO: verify correct number of sub-expressions for the given expression
+		// verify correct number of sub-expressions for the given expression
+		switch (tree[newnodeIdx].type) {
+			size_t subcount;
+			ssize_t funargs;
+		case ASTNODE_LET:
+			// 'let' nodes, whether let-expressions or defun-statements, need at least one expression to return
+			subcount = getSubCount(false, newnodeIdx, tree);
+			if (0 == subcount) {
+				fprintf(stderr, "invalid let/defun at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+			break;
+		case ASTNODE_EVAL_FUN:
+			subcount = getSubCount(false, newnodeIdx, tree);
+			funargs = getMinFunArgs(newnodeIdx, tree);
+
+			// check if referenced function exists
+			if ((size_t(-1) >> 1) == funargs) {
+				fprintf(stderr, "unknown function call at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+
+			// non-negative funargs means exact count, negative -- minimal count
+			if (0 <= funargs ? subcount != funargs : subcount < -funargs) {
+				fprintf(stderr, "invalid function call at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+			break;
+		default:
+			break;
+		}
+
 		return span;
 	}
 
