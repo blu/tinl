@@ -1,0 +1,5 @@
+(defun isEq(x y)
+	(let ((diff (- x y))) (ifzero diff 1 0)))
+(defun isLessEq(x y)
+	(let ((diff (- x y))) (ifneg diff 1 (ifzero diff 1 0))))
+42

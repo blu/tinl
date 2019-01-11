@@ -20,7 +20,9 @@ const char* keywords[] = { // keep order in sync with Token enum below to mainta
 	"+",
 	"-",
 	"*",
-	"/"
+	"/",
+	"ifzero",
+	"ifneg"
 };
 
 // unlike keywords, a contiguous sequence of separators collapses into a single separator, which vanishes before reaching the token stream
@@ -42,6 +44,8 @@ enum Token : uint16_t { // keep order in sync with keywords above to maintain a 
 	TOKEN_MINUS,
 	TOKEN_MUL,
 	TOKEN_DIV,
+	TOKEN_IFZERO,
+	TOKEN_IFNEG,
 	TOKEN_LITERAL_I32,
 	TOKEN_LITERAL_F32,
 	TOKEN_IDENTIFIER
@@ -68,6 +72,10 @@ const char* stringFromToken(const Token t)
 		return "TOKEN_MUL";
 	case TOKEN_DIV:
 		return "TOKEN_DIV";
+	case TOKEN_IFZERO:
+		return "TOKEN_IFZERO";
+	case TOKEN_IFNEG:
+		return "TOKEN_IFNEG";
 	case TOKEN_LITERAL_I32:
 		return "TOKEN_LITERAL_I32";
 	case TOKEN_LITERAL_F32:
@@ -432,8 +440,6 @@ struct ASTNode {
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
 {
-	assert(name.ptr && name.len || !name.ptr && !name.len);
-
 	for (size_t i = 0; i < depth; ++i)
 		fprintf(f, "  ");
 
@@ -441,6 +447,7 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 
 	switch (type) {
 	case ASTNODE_LET:
+		assert(name.ptr && name.len || !name.ptr && !name.len);
 		if (name.ptr)
 			fprintf(f, "%s: %.*s\n", stringType, name.len, name.ptr);
 		else
@@ -449,6 +456,7 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 	case ASTNODE_INIT:
 	case ASTNODE_EVAL_VAR:
 	case ASTNODE_EVAL_FUN:
+		assert(name.ptr && name.len);
 		fprintf(f, "%s: %.*s\n", stringType, name.len, name.ptr);
 		break;
 	case ASTNODE_LITERAL_I32:
@@ -739,7 +747,7 @@ ASTNodeIndex checkKnownDefun(
 	return checkKnownDefun(name, len, tree[parent].parent, tree);
 }
 
-// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count
+// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
 // if no such known function, return max ssize_t
 ssize_t getMinFunArgs(
 	const ASTNodeIndex parent,
@@ -749,8 +757,9 @@ ssize_t getMinFunArgs(
 	const ASTNode& node = tree[parent];
 	assert(ASTNODE_EVAL_FUN == node.type);
 
-	// check built-in functions; at a match a minimum number of args is returned -- a negative ssize_t
-	if (1 == node.name.len) {
+	// check built-in functions
+	switch (node.name.len) {
+	case 1: // arithmetic functions have a minimum number of args
 		if (0 == strncmp("+", node.name.ptr, 1))
 			return -2;
 		if (0 == strncmp("-", node.name.ptr, 1))
@@ -759,13 +768,22 @@ ssize_t getMinFunArgs(
 			return -2;
 		if (0 == strncmp("/", node.name.ptr, 1))
 			return -2;
+		break;
+	case 5: // branch functions have an exact number of args
+		if (0 == strncmp("ifneg", node.name.ptr, 5))
+			return 3;
+		break;
+	case 6:
+		if (0 == strncmp("ifzero", node.name.ptr, 6))
+			return 3;
 	}
 
-	// check the upper tree for a matching defun; at a match an exact number of args is returned -- a positive ssize_t
+	// check the upper tree for a matching defun; at a match an exact number of args is returned
 	const ASTNodeIndex defunIdx = checkKnownDefun(node.name.ptr, node.name.len, node.parent, tree);
 	if (nullidx != defunIdx)
 		return getSubCount(true, defunIdx, tree);
 
+	// function not found
 	return size_t(-1) >> 1;
 }
 
@@ -886,6 +904,8 @@ size_t getNode(
 		case TOKEN_MINUS:
 		case TOKEN_MUL:
 		case TOKEN_DIV:
+		case TOKEN_IFZERO:
+		case TOKEN_IFNEG:
 		case TOKEN_IDENTIFIER:
 			newnode.name.ptr = tokens[start_it].loc;
 			newnode.name.len = tokens[start_it].len;
@@ -1056,6 +1076,13 @@ int main(int argc, char** argv)
 
 		start_it += span;
 		len_it -= span;
+	}
+
+	// root expression must return something
+	if (0 == getSubCount(false, 0, tree)) {
+		fprintf(stderr, "root expression does not return\n");
+		fprintf(stdout, "failure\n");
+		return -1;
 	}
 
 #if 0 // no use of printing the dummy root node
