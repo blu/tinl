@@ -22,7 +22,8 @@ const char* keywords[] = { // keep order in sync with Token enum below to mainta
 	"*",
 	"/",
 	"ifzero",
-	"ifneg"
+	"ifneg",
+	"print"
 };
 
 // unlike keywords, a contiguous sequence of separators collapses into a single separator, which vanishes before reaching the token stream
@@ -36,6 +37,7 @@ const char separators[] = {
 // tokens represent all known lexical categries -- keywords, literals and identifiers, plus the 'unknown' category
 enum Token : uint16_t { // keep order in sync with keywords above to maintain a mapping shortcut
 	TOKEN_UNKNOWN,
+	// keywords
 	TOKEN_PARENTHESIS_L,
 	TOKEN_PARENTHESIS_R,
 	TOKEN_DEFUN,
@@ -46,8 +48,11 @@ enum Token : uint16_t { // keep order in sync with keywords above to maintain a 
 	TOKEN_DIV,
 	TOKEN_IFZERO,
 	TOKEN_IFNEG,
+	TOKEN_PRINT,
+	// literals
 	TOKEN_LITERAL_I32,
 	TOKEN_LITERAL_F32,
+	// identifiers
 	TOKEN_IDENTIFIER
 };
 
@@ -76,6 +81,8 @@ const char* stringFromToken(const Token t)
 		return "TOKEN_IFZERO";
 	case TOKEN_IFNEG:
 		return "TOKEN_IFNEG";
+	case TOKEN_PRINT:
+		return "TOKEN_PRINT";
 	case TOKEN_LITERAL_I32:
 		return "TOKEN_LITERAL_I32";
 	case TOKEN_LITERAL_F32:
@@ -769,9 +776,11 @@ ssize_t getMinFunArgs(
 		if (0 == strncmp("/", node.name.ptr, 1))
 			return -2;
 		break;
-	case 5: // branch functions have an exact number of args
+	case 5: // all other functions have an exact number of args
 		if (0 == strncmp("ifneg", node.name.ptr, 5))
 			return 3;
+		if (0 == strncmp("print", node.name.ptr, 5))
+			return 1;
 		break;
 	case 6:
 		if (0 == strncmp("ifzero", node.name.ptr, 6))
@@ -906,6 +915,7 @@ size_t getNode(
 		case TOKEN_DIV:
 		case TOKEN_IFZERO:
 		case TOKEN_IFNEG:
+		case TOKEN_PRINT:
 		case TOKEN_IDENTIFIER:
 			newnode.name.ptr = tokens[start_it].loc;
 			newnode.name.len = tokens[start_it].len;
