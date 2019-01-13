@@ -1,10 +1,10 @@
 Description
 -----------
 
-*This is Not Lisp* (**TINL**; proncounced *tai-nul*) is a minimalistic LISP-like language, with the following limitations:
+*This is Not Lisp* (**TINL**; proncounced *tai-nul*) is a minimalistic LISP-like language, with the following essential restrictions:
 
 * no lists
-* no array, vector, string or function types
+* no array, vector, string or function types -- just scalars
 * no custom types -- only built-in types
 * no *set/setq/setf* forms -- TINL is purely functional
 * no quoted expressions
@@ -19,7 +19,7 @@ Description
 Example of correspondence between LISP and TINL
 -----------------------------------------------
 
-Print `n + 2` consecutive members of the Fibonacci sequence. Examples intentionally written for maximum likeness.
+Print `n + 2` consecutive members of the Fibonacci sequence. Maximum code likeness sought.
 
 Common LISP:
 
@@ -34,3 +34,8 @@ TINL:
 	(defun fib(x y n)
 		(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
 ```
+
+To Do
+-----
+
+Read numeric input from stdin.
