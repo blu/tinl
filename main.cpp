@@ -736,7 +736,7 @@ ASTNodeIndex checkKnownDefun(
 
 	assert(parent < tree.size());
 
-	// check all prent and grand-parent let-expressions and defun-statements, as well as the dummy root node
+	// check all parent and grand-parent let-expressions and defun-statements, as well as the dummy root node
 	if (ASTNODE_LET == tree[parent].type || ASTNODE_NONE == tree[parent].type) {
 		if (len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name, len)) {
 			return parent;
@@ -753,6 +753,8 @@ ASTNodeIndex checkKnownDefun(
 
 	return checkKnownDefun(name, len, tree[parent].parent, tree);
 }
+
+const ssize_t max_ssize = size_t(-1) >> 1;
 
 // return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
 // if no such known function, return max ssize_t
@@ -793,7 +795,7 @@ ssize_t getMinFunArgs(
 		return getSubCount(true, defunIdx, tree);
 
 	// function not found
-	return size_t(-1) >> 1;
+	return max_ssize;
 }
 
 // get the leading AST node in a token-stream span; return number of tokens encompassed; -1 if error
@@ -964,7 +966,7 @@ size_t getNode(
 			funargs = getMinFunArgs(newnodeIdx, tree);
 
 			// check if referenced function exists
-			if ((size_t(-1) >> 1) == funargs) {
+			if (max_ssize == funargs) {
 				fprintf(stderr, "unknown function call at line %d, column %d\n",
 					tokens[start].row,
 					tokens[start].col);
