@@ -248,7 +248,7 @@ bool isDecimalPoint(const char* str)
 
 // get a single context-free token from the specified stream location; tokens are recognized as belonging to one of four categories, in decreasing precedence:
 // literals > keywords > identifiers > unknown
-Token getToken(const char* str, size_t& tokenLen, int32_t& lit_i32, float& lit_f32)
+Token getToken(const char* str, uint32_t& tokenLen, int32_t& lit_i32, float& lit_f32)
 {
 	assert(!isSeparator(str));
 
@@ -281,7 +281,7 @@ Token getToken(const char* str, size_t& tokenLen, int32_t& lit_i32, float& lit_f
 	// heuristics to tell literals from literal-prefixed identifiers: if a literal ends with an identifier-allowed character, next character should not be identifier-allowed
 	if (tokend != str && !isSign(tokend) && !isDecimalPoint(tokend) && (!isAllowedIdentifier(tokend - 1) || !isAllowedIdentifier(tokend))) {
 		const size_t toklen = tokend - str;
-		size_t consumed = 0;
+		int consumed = 0;
 
 		if (hex) {
 			// try reading a hexadecimal integer
@@ -343,24 +343,25 @@ Token getToken(const char* str, size_t& tokenLen, int32_t& lit_i32, float& lit_f
 // tokenize a stream into tokens, keeping track of stream rows and columns
 bool tokenize(
 	const char* str,
-	std::vector<TokenInStream>& tokens,
-	size_t& row,
-	size_t& col)
+	std::vector<TokenInStream>& tokens)
 {
+	uint32_t row = 0;
+	uint32_t col = 0;
+
 	while (!isTerminator(str)) {
 		const TriState sep = isSeparator(str);
 		if (sep) {
 			// at new-line advance row count and reset column count
 			if (TRI_PRIME == sep) {
 				row++;
-				col = size_t(-1);
+				col = uint32_t(-1);
 			}
 			col++;
 			str++;
 			continue;
 		}
 
-		size_t tokenLen = 0;
+		uint32_t tokenLen = 0;
 		int32_t lit_i32 = 0;
 		float lit_f32 = 0;
 		const Token token = getToken(str, tokenLen, lit_i32, lit_f32);
@@ -1057,10 +1058,7 @@ int main(int argc, char** argv)
 	std::vector<TokenInStream> tokens;
 	tokens.reserve(1024);
 
-	size_t row = 0;
-	size_t col = 0;
-
-	if (!tokenize(buffer.data(), tokens, row, col)) {
+	if (!tokenize(buffer.data(), tokens)) {
 		fprintf(stdout, "failure\n");
 		return -1;
 	}
