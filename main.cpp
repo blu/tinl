@@ -423,8 +423,8 @@ const char* stringFromNodeType(const ASTNodeType t)
 
 // AST expression return types; may also be attributed to init statements
 enum ASTReturnType : uint16_t {
-	ASTRETURN_NONE,    // return type not applicable
-	ASTRETURN_UNKNOWN, // yet-to-be-resolved return type; resolves to one of the following types
+	ASTRETURN_NONE,    // return type not established
+	ASTRETURN_UNKNOWN, // runtime-resolved return type
 	ASTRETURN_I32,     // 32-bit signed integer
 	ASTRETURN_F32      // 32-bit floating point
 };
@@ -466,6 +466,7 @@ struct ASTNode {
 	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
+	bool isDefun() const { return ASTNODE_LET == type && name.ptr; }
 };
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
@@ -564,7 +565,7 @@ size_t getSubCount(
 	size_t ret = 0;
 	for (; it != node.args.end(); ++it) {
 		// ignore 'defun' statements, i.e. named 'let' sub-nodes
-		if (ASTNODE_LET == tree[*it].type && tree[*it].name.ptr)
+		if (tree[*it].isDefun())
 			continue;
 
 		ret++;
@@ -632,7 +633,7 @@ size_t getNodeLet(
 		ASTNode newnode;
 		newnode.name.ptr = tokens[start_it].loc;
 		newnode.name.len = tokens[start_it].len;
-		newnode.retType = ASTRETURN_UNKNOWN;
+		newnode.retType = ASTRETURN_NONE;
 		newnode.type = ASTNODE_INIT;
 		newnode.parent = parent;
 
@@ -749,7 +750,7 @@ ASTNodeIndex checkKnownVar(
 			if (ASTNODE_INIT != tree[*it].type)
 				break;
 
-			if (tree[*it].name.len == len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
 				return *it;
 		}
 	}
@@ -781,7 +782,7 @@ ASTNodeIndex checkKnownDefun(
 			if (ASTNODE_LET != tree[*it].type)
 				continue;
 
-			if (tree[*it].name.len == len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
 				return *it;
 		}
 	}
@@ -791,43 +792,100 @@ ASTNodeIndex checkKnownDefun(
 
 const ssize_t max_ssize = size_t(-1) >> 1;
 
-// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
-// if no such known function, return max ssize_t
-ssize_t getMinFunArgs(
+// return the promoted type of the args to an arithmetic-like expression, starting from the i-th arg; rules of promotion: i32 < unknown < f32
+ASTReturnType getArgsReturnType(
 	const ASTNodeIndex parent,
-	const ASTNodes& tree)
+	const ASTNodes& tree,
+	const size_t first = 0)
 {
 	assert(nullidx != parent && parent < tree.size());
 	const ASTNode& node = tree[parent];
 	assert(ASTNODE_EVAL_FUN == node.type);
 
-	// check built-in functions
+	if (node.args.empty())
+		return ASTRETURN_NONE;
+
+	ASTReturnType ret = ASTRETURN_NONE;
+
+	// shortcut: stop iterating the args as soon as max promotion level is reached
+	for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end() && ASTRETURN_F32 != ret; ++it) {
+		if (it - node.args.begin() < first)
+			continue;
+
+		switch (tree[*it].retType) {
+		case ASTRETURN_UNKNOWN:
+			if (ASTRETURN_F32 != ret)
+				ret = ASTRETURN_UNKNOWN;
+			break;
+		case ASTRETURN_I32:
+			if (ASTRETURN_NONE == ret)
+				ret = ASTRETURN_I32;
+			break;
+		case ASTRETURN_F32:
+			ret = ASTRETURN_F32;
+			break;
+		default:
+			break;
+		}
+	}
+
+	return ret;
+}
+
+// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
+// if no such known function, return max ssize_t; if a function is found, update the return type of the invocation to the one of the function
+ssize_t getMinFunArgs(
+	const ASTNodeIndex parent,
+	ASTNodes& tree)
+{
+	assert(nullidx != parent && parent < tree.size());
+	const ASTNode& node = tree[parent];
+	assert(ASTNODE_EVAL_FUN == node.type);
+
+	// check built-in functions; patch the return type of the invocation
 	switch (node.name.len) {
 	case 1: // arithmetic functions have a minimum number of args
-		if (0 == strncmp("+", node.name.ptr, 1))
+		if (0 == strncmp("+", node.name.ptr, 1)) {
+			tree[parent].retType = getArgsReturnType(parent, tree);
 			return -2;
-		if (0 == strncmp("-", node.name.ptr, 1))
+		}
+		if (0 == strncmp("-", node.name.ptr, 1)) {
+			tree[parent].retType = getArgsReturnType(parent, tree);
 			return -2;
-		if (0 == strncmp("*", node.name.ptr, 1))
+		}
+		if (0 == strncmp("*", node.name.ptr, 1)) {
+			tree[parent].retType = getArgsReturnType(parent, tree);
 			return -2;
-		if (0 == strncmp("/", node.name.ptr, 1))
+		}
+		if (0 == strncmp("/", node.name.ptr, 1)) {
+			tree[parent].retType = getArgsReturnType(parent, tree);
 			return -2;
+		}
 		break;
 	case 5: // all other functions have an exact number of args
-		if (0 == strncmp("ifneg", node.name.ptr, 5))
+		if (0 == strncmp("ifneg", node.name.ptr, 5)) {
+			tree[parent].retType = getArgsReturnType(parent, tree, 1);
 			return 3;
-		if (0 == strncmp("print", node.name.ptr, 5))
+		}
+		if (0 == strncmp("print", node.name.ptr, 5)) {
+			tree[parent].retType = getArgsReturnType(parent, tree);
 			return 1;
+		}
 		break;
 	case 6:
-		if (0 == strncmp("ifzero", node.name.ptr, 6))
+		if (0 == strncmp("ifzero", node.name.ptr, 6)) {
+			tree[parent].retType = getArgsReturnType(parent, tree, 1);
 			return 3;
+		}
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
 	const ASTNodeIndex defunIdx = checkKnownDefun(node.name.ptr, node.name.len, node.parent, tree);
-	if (nullidx != defunIdx)
+	if (nullidx != defunIdx) {
+		// patch the return type of the invocation
+		tree[parent].retType = tree[defunIdx].retType;
 		return getSubCount(true, defunIdx, tree);
+	}
 
 	// function not found
 	return max_ssize;
@@ -882,6 +940,14 @@ size_t getNode(
 		switch (tokens[start_it].token) {
 			size_t subspan;
 		case TOKEN_DEFUN:
+			// statements are disallowed among fun args for better lisp-ness
+			if (ASTNODE_EVAL_FUN == tree[parent].type) {
+				fprintf(stderr, "misplaced defun at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+
 			// check basic prerequisites of 'defun' statement: defun f() expr
 			if (5 > span_it || TOKEN_IDENTIFIER != tokens[start_it + 1].token) {
 				fprintf(stderr, "invalid defun at line %d, column %d\n",
@@ -897,7 +963,7 @@ size_t getNode(
 			// node introduces a named scope
 			newnode.name.ptr = tokens[start_it].loc;
 			newnode.name.len = tokens[start_it].len;
-			newnode.retType = ASTRETURN_UNKNOWN;
+			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_LET;
 			newnode.parent = parent;
 
@@ -926,7 +992,7 @@ size_t getNode(
 			// node introduces an anonymous scope
 			newnode.name.ptr = nullptr;
 			newnode.name.len = 0;
-			newnode.retType = ASTRETURN_UNKNOWN;
+			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_LET;
 			newnode.parent = parent;
 
@@ -958,7 +1024,7 @@ size_t getNode(
 		case TOKEN_IDENTIFIER:
 			newnode.name.ptr = tokens[start_it].loc;
 			newnode.name.len = tokens[start_it].len;
-			newnode.retType = ASTRETURN_UNKNOWN;
+			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_EVAL_FUN;
 			newnode.parent = parent;
 
@@ -986,6 +1052,7 @@ size_t getNode(
 		}
 
 		// verify correct number of sub-expressions for the given expression
+		ASTNodeIndices::const_reverse_iterator it;
 		switch (tree[newnodeIdx].type) {
 			size_t subcount;
 			ssize_t funargs;
@@ -998,6 +1065,10 @@ size_t getNode(
 					tokens[start].col);
 				return size_t(-1);
 			}
+			// return type copied from last sub-expression
+			for (it = tree[newnodeIdx].args.rbegin(); it != tree[newnodeIdx].args.rend() && tree[*it].isDefun(); ++it) {}
+
+			tree[newnodeIdx].retType = tree[*it].retType;
 			break;
 		case ASTNODE_EVAL_FUN:
 			subcount = getSubCount(false, newnodeIdx, tree);
