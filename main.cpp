@@ -444,6 +444,7 @@ struct ASTNode {
 	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
+	bool isDefun() const { return ASTNODE_LET == type && name.ptr; }
 };
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
@@ -535,7 +536,7 @@ size_t getSubCount(
 	size_t ret = 0;
 	for (; it != node.args.end(); ++it) {
 		// ignore 'defun' statements, i.e. named 'let' sub-nodes
-		if (ASTNODE_LET == tree[*it].type && tree[*it].name.ptr)
+		if (tree[*it].isDefun())
 			continue;
 
 		ret++;
@@ -715,7 +716,7 @@ ASTNodeIndex checkKnownVar(
 			if (ASTNODE_INIT != tree[*it].type)
 				break;
 
-			if (tree[*it].name.len == len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
 				return *it;
 		}
 	}
@@ -747,7 +748,7 @@ ASTNodeIndex checkKnownDefun(
 			if (ASTNODE_LET != tree[*it].type)
 				continue;
 
-			if (tree[*it].name.len == len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
 				return *it;
 		}
 	}
@@ -848,6 +849,14 @@ size_t getNode(
 		switch (tokens[start_it].token) {
 			size_t subspan;
 		case TOKEN_DEFUN:
+			// statements are disallowed among fun args for better lisp-ness
+			if (ASTNODE_EVAL_FUN == tree[parent].type) {
+				fprintf(stderr, "misplaced defun at line %d, column %d\n",
+					tokens[start].row,
+					tokens[start].col);
+				return size_t(-1);
+			}
+
 			// check basic prerequisites of 'defun' statement: defun f() expr
 			if (5 > span_it || TOKEN_IDENTIFIER != tokens[start_it + 1].token) {
 				fprintf(stderr, "invalid defun at line %d, column %d\n",
