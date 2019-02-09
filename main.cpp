@@ -398,7 +398,6 @@ bool tokenize(
 // Abstract Syntax Tree (AST)
 // kinds of AST nodes
 enum ASTNodeType : uint16_t {
-	ASTNODE_NONE,
 	ASTNODE_LET,         // expression that introduces named variables via a dedicated scope
 	ASTNODE_INIT,        // statement that initializes a single named variable; appears at the beginning of 'let' expressions
 	ASTNODE_EVAL_VAR,    // variable evaluation expression
@@ -413,8 +412,6 @@ enum ASTNodeType : uint16_t {
 const char* stringFromNodeType(const ASTNodeType t)
 {
 	switch (t) {
-	case ASTNODE_NONE:
-		return "ASTNODE_NONE";
 	case ASTNODE_LET:
 		return "ASTNODE_LET";
 	case ASTNODE_INIT:
@@ -740,7 +737,7 @@ ASTNodeIndex checkKnownDefun(
 	assert(parent < tree.size());
 
 	// check all parent and grand-parent let-expressions and defun-statements, as well as the dummy root node
-	if (ASTNODE_LET == tree[parent].type || ASTNODE_NONE == tree[parent].type) {
+	if (ASTNODE_LET == tree[parent].type) {
 		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len)) {
 			return parent;
 		}
@@ -889,8 +886,8 @@ size_t getNode(
 			break;
 
 		case TOKEN_LET:
-			// check basic prerequisites of 'let' expression: let ((x expr)) expr
-			if (8 > span_it || TOKEN_PARENTHESIS_L != tokens[start_it + 1].token) {
+			// check basic prerequisites of 'let' expression: let () expr
+			if (4 > span_it || TOKEN_PARENTHESIS_L != tokens[start_it + 1].token) {
 				fprintf(stderr, "invalid let at line %d, column %d\n",
 					tokens[start].row,
 					tokens[start].col);
@@ -1169,7 +1166,6 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree)
 	const ASTNode& node = tree[index];
 
 	switch (node.type) {
-	case ASTNODE_NONE:
 	case ASTNODE_LET:
 		assert(false);
 		break;
@@ -1255,7 +1251,7 @@ int main(int argc, char** argv)
 
 #endif
 	ASTNodes tree;
-	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .type = ASTNODE_NONE, .parent = nullidx, .args = ASTNodeIndices() };
+	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
 	tree.push_back(root);
 
 	size_t start_it = 0;
