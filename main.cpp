@@ -94,10 +94,18 @@ const char* stringFromToken(const Token t)
 	return "alien-token";
 }
 
+// a ref to an immutable sequence of T
+template < typename T >
+struct SeqRef {
+	const T* ptr; // sequence without sentinel
+	uint32_t len; // length of sequence
+};
+
+typedef SeqRef< char > StrRef;
+
 // a token as found in the source stream
 struct TokenInStream {
-	const char* loc;
-	uint32_t len;
+	StrRef   val;
 	uint32_t row;
 	uint32_t col;
 	union {
@@ -118,7 +126,7 @@ void TokenInStream::print(FILE* f) const
 			"%s: %d\n\t"
 			"%p, %u\n\t"
 			"%u, %u\n}",
-			stringToken, literal_i32, loc, len, row, col);
+			stringToken, literal_i32, val.ptr, val.len, row, col);
 	}
 	else
 	if (TOKEN_LITERAL_F32 == token) {
@@ -126,7 +134,7 @@ void TokenInStream::print(FILE* f) const
 			"%s: %f\n\t"
 			"%p, %u\n\t"
 			"%u, %u\n}",
-			stringToken, literal_f32, loc, len, row, col);
+			stringToken, literal_f32, val.ptr, val.len, row, col);
 	}
 	else
 	if (TOKEN_IDENTIFIER == token) {
@@ -134,14 +142,14 @@ void TokenInStream::print(FILE* f) const
 			"%s: %.*s\n\t"
 			"%p, %u\n\t"
 			"%u, %u\n}",
-			stringToken, len, loc, loc, len, row, col);
+			stringToken, val.len, val.ptr, val.ptr, val.len, row, col);
 	}
 	else {
 		fprintf(f, "{\n\t"
 			"%s\n\t"
 			"%p, %u\n\t"
 			"%u, %u\n}",
-			stringToken, loc, len, row, col);
+			stringToken, val.ptr, val.len, row, col);
 	}
 }
 
@@ -372,11 +380,11 @@ bool tokenize(
 		}
 
 		if (TOKEN_LITERAL_F32 == token) {
-			const TokenInStream tis = { .loc = str, .len = tokenLen, .row = row, .col = col, .literal_f32 = lit_f32, .token = token };
+			const TokenInStream tis = { .val = { .ptr = str, .len = tokenLen }, .row = row, .col = col, .literal_f32 = lit_f32, .token = token };
 			tokens.push_back(tis);
 		}
 		else {
-			const TokenInStream tis = { .loc = str, .len = tokenLen, .row = row, .col = col, .literal_i32 = lit_i32, .token = token };
+			const TokenInStream tis = { .val = { .ptr = str, .len = tokenLen }, .row = row, .col = col, .literal_i32 = lit_i32, .token = token };
 			tokens.push_back(tis);
 		}
 
@@ -432,10 +440,7 @@ const ASTNodeIndex nullidx = ASTNodeIndex(-1);
 // AST node -- the equivalent of an expression or a statement in a (sub-) program
 struct ASTNode {
 	union {
-		struct {
-			const char* ptr; // name of variable or function
-			uint32_t len;    // length of name
-		} name;
+		StrRef  name;        // name of variable or function, AKA identifier
 		int32_t literal_i32; // value of integral literal
 		float   literal_f32; // value of floating-point literal
 	};
@@ -602,8 +607,7 @@ size_t getNodeLet(
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
 		ASTNode newnode;
-		newnode.name.ptr = tokens[start_it].loc;
-		newnode.name.len = tokens[start_it].len;
+		newnode.name = tokens[start_it].val;
 		newnode.type = ASTNODE_INIT;
 		newnode.parent = parent;
 
@@ -678,8 +682,7 @@ size_t getNodeDefun(
 		}
 
 		ASTNode newnode;
-		newnode.name.ptr = tokens[start_it].loc;
-		newnode.name.len = tokens[start_it].len;
+		newnode.name = tokens[start_it].val;
 		newnode.type = ASTNODE_INIT;
 		newnode.parent = parent;
 
@@ -697,13 +700,12 @@ size_t getNodeDefun(
 
 // return the index of the 'init' statement of a named var; -1 if not found
 ASTNodeIndex checkKnownVar(
-	const char* name,
-	const size_t len,
+	const StrRef& name,
 	const ASTNodeIndex parent,
 	const ASTNodes& tree)
 {
-	assert(name);
-	assert(len);
+	assert(name.ptr);
+	assert(name.len);
 
 	if (nullidx == parent)
 		return nullidx;
@@ -716,22 +718,21 @@ ASTNodeIndex checkKnownVar(
 			if (ASTNODE_INIT != tree[*it].type)
 				break;
 
-			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (name.len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name.ptr, name.len))
 				return *it;
 		}
 	}
 
-	return checkKnownVar(name, len, tree[parent].parent, tree);
+	return checkKnownVar(name, tree[parent].parent, tree);
 }
 
 ASTNodeIndex checkKnownDefun(
-	const char* name,
-	const size_t len,
+	const StrRef& name,
 	const ASTNodeIndex parent,
 	const ASTNodes& tree)
 {
-	assert(name);
-	assert(len);
+	assert(name.ptr);
+	assert(name.len);
 
 	if (nullidx == parent)
 		return nullidx;
@@ -740,7 +741,7 @@ ASTNodeIndex checkKnownDefun(
 
 	// check all parent and grand-parent let-expressions and defun-statements, as well as the dummy root node
 	if (ASTNODE_LET == tree[parent].type || ASTNODE_NONE == tree[parent].type) {
-		if (len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name, len)) {
+		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len)) {
 			return parent;
 		}
 		// check all defun-sub-nodes of this (grand) parent
@@ -748,12 +749,12 @@ ASTNodeIndex checkKnownDefun(
 			if (ASTNODE_LET != tree[*it].type)
 				continue;
 
-			if (len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name, len))
+			if (name.len == tree[*it].name.len && 0 == strncmp(tree[*it].name.ptr, name.ptr, name.len))
 				return *it;
 		}
 	}
 
-	return checkKnownDefun(name, len, tree[parent].parent, tree);
+	return checkKnownDefun(name, tree[parent].parent, tree);
 }
 
 const ssize_t max_ssize = size_t(-1) >> 1;
@@ -792,7 +793,7 @@ ssize_t getMinFunArgs(
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
-	const ASTNodeIndex defunIdx = checkKnownDefun(node.name.ptr, node.name.len, node.parent, tree);
+	const ASTNodeIndex defunIdx = checkKnownDefun(node.name, node.parent, tree);
 	if (nullidx != defunIdx)
 		return getSubCount(true, defunIdx, tree);
 
@@ -870,8 +871,7 @@ size_t getNode(
 			span_it--;
 
 			// node introduces a named scope
-			newnode.name.ptr = tokens[start_it].loc;
-			newnode.name.len = tokens[start_it].len;
+			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_LET;
 			newnode.parent = parent;
 
@@ -929,8 +929,7 @@ size_t getNode(
 		case TOKEN_IFNEG:
 		case TOKEN_PRINT:
 		case TOKEN_IDENTIFIER:
-			newnode.name.ptr = tokens[start_it].loc;
-			newnode.name.len = tokens[start_it].len;
+			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_EVAL_FUN;
 			newnode.parent = parent;
 
@@ -1015,7 +1014,7 @@ size_t getNode(
 
 	case TOKEN_IDENTIFIER:
 		// check against known var identifiers
-		initIdx = checkKnownVar(tokens[start].loc, tokens[start].len, parent, tree);
+		initIdx = checkKnownVar(tokens[start].val, parent, tree);
 
 		if (nullidx == initIdx) {
 			fprintf(stderr, "unknown var at line %d, column %d\n",
@@ -1024,8 +1023,7 @@ size_t getNode(
 			return size_t(-1);
 		}
 
-		newnode.name.ptr = tokens[start].loc;
-		newnode.name.len = tokens[start].len;
+		newnode.name = tokens[start].val;
 		newnode.type = ASTNODE_EVAL_VAR;
 		newnode.parent = parent;
 		break;
