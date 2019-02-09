@@ -1038,6 +1038,183 @@ size_t getNode(
 	return 1;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// evaluation of (guaranteed correct) AST
+
+enum Type {
+	TYPE_I32,
+	TYPE_F32
+};
+
+const char* stringFromType(const Type t)
+{
+	switch (t) {
+	case TYPE_I32:
+		return "TYPE_I32";
+	case TYPE_F32:
+		return "TYPE_F32";
+	}
+
+	return "alien-type";
+}
+
+struct Value {
+	Type type;
+	union {
+		int32_t i32;
+		float f32;
+	};
+
+	void print(FILE* f) const;
+};
+
+void Value::print(FILE* f) const
+{
+	fprintf(f, "%s", stringFromType(type));
+
+	switch (type) {
+	case TYPE_I32:
+		fprintf(f, " %d\n", i32);
+		break;
+	case TYPE_F32:
+		fprintf(f, " %f\n", f32);
+		break;
+	}
+}
+
+struct NamedValue {
+	StrRef name;
+	Value  val;
+};
+
+typedef std::vector< NamedValue > StackFrames;
+
+Value eval(const ASTNodeIndex index, const ASTNodes& tree);
+
+template < int32_t BINOP_I32(int32_t, int32_t), float BINOP_F32(float, float) >
+Value evalArith(const ASTNodeIndex index, const ASTNodes& tree)
+{
+	assert(nullidx != index && index < tree.size());
+	const ASTNode& node = tree[index];
+
+	int32_t acc_i32 = 0;
+	float acc_f32 = 0;
+	bool isF32 = false;
+
+	// arithmetic intrinsics have at least two args
+	ASTNodeIndices::const_iterator it = node.args.begin();
+	const Value arg = eval(*it++, tree);
+
+	// promote computation to f32 at the first encounter of an f32 arg
+	if (TYPE_F32 == arg.type) {
+		acc_f32 = arg.f32;
+		isF32 = true;
+	}
+	else {
+		assert(TYPE_I32 == arg.type);
+		acc_i32 = arg.i32;
+	}
+
+	if (!isF32) {
+		for (; it != node.args.end(); ++it) {
+			const Value arg = eval(*it, tree);
+
+			if (TYPE_F32 == arg.type) {
+				++it; // we are done with this arg
+				acc_f32 = BINOP_F32(float(acc_i32), arg.f32);
+				isF32 = true;
+				break;
+			}
+
+			assert(TYPE_I32 == arg.type);
+			acc_i32 = BINOP_I32(acc_i32, arg.i32);
+		}
+	}
+
+	if (isF32) {
+		for (; it != node.args.end(); ++it) {
+			const Value arg = eval(*it, tree);
+
+			if (TYPE_I32 == arg.type) {
+				acc_f32 = BINOP_F32(acc_f32, float(arg.i32));
+			}
+			else {
+				assert(TYPE_F32 == arg.type);
+				acc_f32 = BINOP_F32(acc_f32, arg.f32);
+			}
+		}
+	}
+
+	if (isF32)
+		return Value{ .type = TYPE_F32, .f32 = acc_f32 };
+
+	return Value{ .type = TYPE_I32, .i32 = acc_i32 };
+}
+
+template < typename T >
+T binop_plus(T a, T b) { return a + b; }
+
+template < typename T >
+T binop_minus(T a, T b) { return a - b; }
+
+template < typename T >
+T binop_mul(T a, T b) { return a * b; }
+
+template < typename T >
+T binop_div(T a, T b) { return a / b; }
+
+Value eval(const ASTNodeIndex index, const ASTNodes& tree)
+{
+	assert(nullidx != index && index < tree.size());
+	const ASTNode& node = tree[index];
+
+	switch (node.type) {
+	case ASTNODE_NONE:
+	case ASTNODE_LET:
+		assert(false);
+		break;
+	case ASTNODE_INIT:
+		assert(false);
+		break;
+	case ASTNODE_EVAL_VAR:
+		assert(false);
+		break;
+	case ASTNODE_EVAL_FUN:
+		// check for intrinsics first
+		switch (node.name.len) {
+		case 1:
+			if (0 == strncmp("+", node.name.ptr, 1))
+				return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree);
+			if (0 == strncmp("-", node.name.ptr, 1))
+				return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree);
+			if (0 == strncmp("*", node.name.ptr, 1))
+				return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree);
+			if (0 == strncmp("/", node.name.ptr, 1))
+				return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree);
+			break;
+		case 5:
+			if (0 == strncmp("ifneg", node.name.ptr, 5))
+				assert(false);
+			if (0 == strncmp("print", node.name.ptr, 5))
+				assert(false);
+			break;
+		case 6:
+			if (0 == strncmp("ifzero", node.name.ptr, 6))
+				assert(false);
+			break;
+		}
+		assert(false);
+		break;
+	case ASTNODE_LITERAL_I32:
+		return Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
+	case ASTNODE_LITERAL_F32:
+		return Value{ .type = TYPE_F32, .f32 = node.literal_f32 };
+	}
+
+	return Value{ .type = TYPE_F32, .f32 = 0.f / 0 };
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // unittest
 int main(int argc, char** argv)
 {
@@ -1111,5 +1288,10 @@ int main(int argc, char** argv)
 
 #endif
 	fprintf(stdout, "success\n");
+
+	// evaluate AST and print result
+	const Value res = eval(1, tree); // first sub-expression of root
+	res.print(stdout);
+
 	return 0;
 }
