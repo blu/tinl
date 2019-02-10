@@ -938,8 +938,8 @@ size_t getNode(
 		switch (tokens[start_it].token) {
 			size_t subspan;
 		case TOKEN_DEFUN:
-			// statements are disallowed among fun args for better lisp-ness
-			if (ASTNODE_EVAL_FUN == tree[parent].type) {
+			// 'defun' statements are disallowed anywhere but in 'let' expressions for better lisp-ness
+			if (ASTNODE_LET != tree[parent].type) {
 				fprintf(stderr, "misplaced defun at line %d, column %d\n",
 					tokens[start].row,
 					tokens[start].col);
@@ -1137,7 +1137,6 @@ size_t getNode(
 	return 1;
 }
 
-// unittest
 int main(int argc, char** argv)
 {
 	FILE* infile = stdin;
@@ -1201,14 +1200,10 @@ int main(int argc, char** argv)
 		return -1;
 	}
 
-#if 0 // no use of printing the dummy root node
-	tree.front().print(stdout, tree, 0);
-
-#else
+	// no use of printing the dummy root node -- print its sub-nodes instead
 	for (ASTNodeIndices::const_iterator it = tree.front().args.begin(); it != tree.front().args.end(); ++it)
 		tree[*it].print(stdout, tree, 0);
 
-#endif
 	fprintf(stdout, "success\n");
 	return 0;
 }
