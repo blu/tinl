@@ -1084,12 +1084,12 @@ struct NamedValue {
 	Value  val;
 };
 
-typedef std::vector< NamedValue > StackFrames;
+typedef std::vector< NamedValue > VarStack;
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree);
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack);
 
 template < int32_t BINOP_I32(int32_t, int32_t), float BINOP_F32(float, float) >
-Value evalArith(const ASTNodeIndex index, const ASTNodes& tree)
+Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 {
 	assert(nullidx != index && index < tree.size());
 	const ASTNode& node = tree[index];
@@ -1100,7 +1100,7 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree)
 
 	// arithmetic intrinsics have at least two args
 	ASTNodeIndices::const_iterator it = node.args.begin();
-	const Value arg = eval(*it++, tree);
+	const Value arg = eval(*it++, tree, stack);
 
 	// promote computation to f32 at the first encounter of an f32 arg
 	if (TYPE_F32 == arg.type) {
@@ -1114,7 +1114,7 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree)
 
 	if (!isF32) {
 		for (; it != node.args.end(); ++it) {
-			const Value arg = eval(*it, tree);
+			const Value arg = eval(*it, tree, stack);
 
 			if (TYPE_F32 == arg.type) {
 				++it; // we are done with this arg
@@ -1130,7 +1130,7 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree)
 
 	if (isF32) {
 		for (; it != node.args.end(); ++it) {
-			const Value arg = eval(*it, tree);
+			const Value arg = eval(*it, tree, stack);
 
 			if (TYPE_I32 == arg.type) {
 				acc_f32 = BINOP_F32(acc_f32, float(arg.i32));
@@ -1160,46 +1160,65 @@ T binop_mul(T a, T b) { return a * b; }
 template < typename T >
 T binop_div(T a, T b) { return a / b; }
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree)
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 {
 	assert(nullidx != index && index < tree.size());
 	const ASTNode& node = tree[index];
 
 	switch (node.type) {
 	case ASTNODE_LET:
-		assert(false);
 		break;
 	case ASTNODE_INIT:
-		assert(false);
 		break;
 	case ASTNODE_EVAL_VAR:
-		assert(false);
 		break;
 	case ASTNODE_EVAL_FUN:
 		// check for intrinsics first
 		switch (node.name.len) {
 		case 1:
 			if (0 == strncmp("+", node.name.ptr, 1))
-				return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree);
+				return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
 			if (0 == strncmp("-", node.name.ptr, 1))
-				return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree);
+				return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
 			if (0 == strncmp("*", node.name.ptr, 1))
-				return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree);
+				return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
 			if (0 == strncmp("/", node.name.ptr, 1))
-				return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree);
+				return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
 			break;
 		case 5:
-			if (0 == strncmp("ifneg", node.name.ptr, 5))
-				assert(false);
-			if (0 == strncmp("print", node.name.ptr, 5))
-				assert(false);
+			if (0 == strncmp("ifneg", node.name.ptr, 5)) {
+				assert(3 == node.args.size());
+				const Value pred = eval(node.args[0], tree, stack);
+
+				if (TYPE_F32 == pred.type ? 0.f > pred.f32 : 0 > pred.i32)
+					return eval(node.args[1], tree, stack);
+
+				return eval(node.args[2], tree, stack);
+			}
+			if (0 == strncmp("print", node.name.ptr, 5)) {
+				assert(1 == node.args.size());
+				const Value arg = eval(node.args[0], tree, stack);
+
+				if (TYPE_F32 == arg.type)
+					fprintf(stdout, "%f\n", arg.f32);
+				else
+					fprintf(stdout, "%d\n", arg.i32);
+
+				return arg;
+			}
 			break;
 		case 6:
-			if (0 == strncmp("ifzero", node.name.ptr, 6))
-				assert(false);
+			if (0 == strncmp("ifzero", node.name.ptr, 6)) {
+				assert(3 == node.args.size());
+				const Value pred = eval(node.args[0], tree, stack);
+
+				if (TYPE_F32 == pred.type ? 0.f == pred.f32 : 0 == pred.i32)
+					return eval(node.args[1], tree, stack);
+
+				return eval(node.args[2], tree, stack);
+			}
 			break;
 		}
-		assert(false);
 		break;
 	case ASTNODE_LITERAL_I32:
 		return Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
@@ -1207,6 +1226,7 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree)
 		return Value{ .type = TYPE_F32, .f32 = node.literal_f32 };
 	}
 
+	assert(false);
 	return Value{ .type = TYPE_F32, .f32 = 0.f / 0 };
 }
 
@@ -1280,7 +1300,8 @@ int main(int argc, char** argv)
 	fprintf(stdout, "success\n");
 
 	// evaluate AST and print result
-	const Value res = eval(1, tree); // first sub-expression of root
+	VarStack stack;
+	const Value res = eval(1, tree, stack); // first sub-expression of root
 	res.print(stdout);
 
 	return 0;
