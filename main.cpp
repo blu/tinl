@@ -1086,7 +1086,7 @@ struct NamedValue {
 
 typedef std::vector< NamedValue > VarStack;
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack);
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs = 0);
 
 template < int32_t BINOP_I32(int32_t, int32_t), float BINOP_F32(float, float) >
 Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
@@ -1160,17 +1160,37 @@ T binop_mul(T a, T b) { return a * b; }
 template < typename T >
 T binop_div(T a, T b) { return a / b; }
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
 {
 	assert(nullidx != index && index < tree.size());
 	const ASTNode& node = tree[index];
+	const uint32_t narg = 0 < nargs ? nargs : 0;
+	const size_t stackRestore = stack.size() - narg;
+	Value ret;
 
 	switch (node.type) {
 	case ASTNODE_LET:
-		break;
+		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
+			if (tree[*it].isDefun())
+				continue;
+
+			ret = eval(*it, tree, stack, nargs--);
+		}
+		// pop args/locals from the var stack
+		stack.resize(stackRestore);
+		return ret;
 	case ASTNODE_INIT:
-		break;
+		if (node.args.empty()) // is this a defun arg? it's already on the var stack -- just name it
+			stack[stack.size() - narg].name = node.name;
+		else // this is a local var -- init it and put it on the stack
+			stack.push_back(NamedValue{ .name = node.name, .val = eval(node.args.front(), tree, stack) });
+		return Value();
 	case ASTNODE_EVAL_VAR:
+		// scan the var stack from the top down for our var
+		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it) {
+			if (it->name.len == node.name.len && 0 == strncmp(it->name.ptr, node.name.ptr, node.name.len))
+				return it->val;
+		}
 		break;
 	case ASTNODE_EVAL_FUN:
 		// check for intrinsics first
@@ -1219,7 +1239,13 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 			}
 			break;
 		}
-		break;
+		// it's a defun -- collect all args, pushing them onto the var stack
+		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
+			const Value arg = eval(*it, tree, stack);
+			stack.push_back(NamedValue{ .name = { .ptr = nullptr, .len = 0 }, .val = arg });
+		}
+		// invoke the callee, which will pop the var stack once done
+		return eval(checkKnownDefun(node.name, node.parent, tree), tree, stack, node.args.size());
 	case ASTNODE_LITERAL_I32:
 		return Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
 	case ASTNODE_LITERAL_F32:
@@ -1301,8 +1327,9 @@ int main(int argc, char** argv)
 
 	// evaluate AST and print result
 	VarStack stack;
-	const Value res = eval(1, tree, stack); // first sub-expression of root
+	const Value res = eval(0, tree, stack);
 	res.print(stdout);
 
+	assert(stack.empty());
 	return 0;
 }
