@@ -1,0 +1,1 @@
+(defun foo(x) (foo (+ (print x) 1))) (foo 0)

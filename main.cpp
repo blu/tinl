@@ -1143,9 +1143,9 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	}
 
 	if (isF32)
-		return Value{ .type = TYPE_F32, .f32 = acc_f32 };
+		return Value{ .type = TYPE_F32, { .f32 = acc_f32 } }; // enclose anonymous union to workaround clang bug
 
-	return Value{ .type = TYPE_I32, .i32 = acc_i32 };
+	return Value{ .type = TYPE_I32, { .i32 = acc_i32 } }; // enclose anonymous union to workaround clang bug
 }
 
 template < typename T >
