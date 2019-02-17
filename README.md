@@ -27,14 +27,14 @@ Built-in functions
 `ifneg arg1 arg2 arg3` -- if arg1 is negative, compute arg2, otherwise compute arg3; return `int` if both arg2 and arg3 are `int`, `float` otherwise  
 `print arg` -- print arg and return arg; exert side-effect
 
-Misc considerations
--------------------
+Interpreter considerations
+--------------------------
 
-For better cross-compatibility with Common LISP, TINL does not allow DEFUN forms among the args to a function invocation -- an artificial limitation to TINL.
+TINL interpreter is implemented as an one-register Harvard stack machine:
 
-```lisp
-	(+ (defun foo() 42) (foo) (foo)) ; define foo in the context of this invocation of ‘+’ ‒ not allowed in LISP, and thus in TINL
-```
+* evaluations are returned via a single (implicit) register  
+* variables and arguments are stored on a data stack  
+* return addresses are stored on an (implicit) return stack
 
 Example of correspondence between LISP and TINL
 -----------------------------------------------
