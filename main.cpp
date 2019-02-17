@@ -443,12 +443,45 @@ struct ASTNode {
 	};
 	ASTNodeType    type;     // semantical type of node
 	ASTNodeIndex   parent;   // parent index
-	ASTNodeIndex   eval;     // eval semantics target; used at tree evaluation
-	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
+	ASTNodeIndex   eval;     // eval semantics target
+	ASTNodeIndices args;     // per argument/sub-expression index
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
 	bool isDefun() const { return ASTNODE_LET == type && name.ptr; }
 };
+
+// special eval targets for built-in functions, AKA intrinsics
+enum : ASTNodeIndex {
+	INTRIN_PLUS   = ASTNodeIndex(-2),
+	INTRIN_MINUS  = ASTNodeIndex(-3),
+	INTRIN_MUL    = ASTNodeIndex(-4),
+	INTRIN_DIV    = ASTNodeIndex(-5),
+	INTRIN_IFZERO = ASTNodeIndex(-6),
+	INTRIN_IFNEG  = ASTNodeIndex(-7),
+	INTRIN_PRINT  = ASTNodeIndex(-8)
+};
+
+ASTNodeIndex getEvalTarget(const Token token)
+{
+	switch (token) {
+	case TOKEN_PLUS:
+		return INTRIN_PLUS;
+	case TOKEN_MINUS:
+		return INTRIN_MINUS;
+	case TOKEN_MUL:
+		return INTRIN_MUL;
+	case TOKEN_DIV:
+		return INTRIN_DIV;
+	case TOKEN_IFZERO:
+		return INTRIN_IFZERO;
+	case TOKEN_IFNEG:
+		return INTRIN_IFNEG;
+	case TOKEN_PRINT:
+		return INTRIN_PRINT;
+	}
+
+	return nullidx;
+}
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
 {
@@ -739,9 +772,9 @@ ASTNodeIndex checkKnownDefun(
 
 	// check all parent and grand-parent let-expressions and defun-statements, as well as the dummy root node
 	if (ASTNODE_LET == tree[parent].type) {
-		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len)) {
+		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len))
 			return parent;
-		}
+
 		// check all defun-sub-nodes of this (grand) parent
 		for (ASTNodeIndices::const_iterator it = tree[parent].args.begin(); it != tree[parent].args.end(); ++it) {
 			if (ASTNODE_LET != tree[*it].type)
@@ -768,30 +801,24 @@ ssize_t getMinFunArgs(
 	assert(ASTNODE_EVAL_FUN == node.type);
 
 	// check built-in functions
-	switch (node.name.len) {
-	case 1: // arithmetic functions have a minimum number of args
-		if (0 == strncmp("+", node.name.ptr, 1))
-			return -2;
-		if (0 == strncmp("-", node.name.ptr, 1))
-			return -2;
-		if (0 == strncmp("*", node.name.ptr, 1))
-			return -2;
-		if (0 == strncmp("/", node.name.ptr, 1))
-			return -2;
-		break;
-	case 5: // all other functions have an exact number of args
-		if (0 == strncmp("ifneg", node.name.ptr, 5))
-			return 3;
-		if (0 == strncmp("print", node.name.ptr, 5))
-			return 1;
-		break;
-	case 6:
-		if (0 == strncmp("ifzero", node.name.ptr, 6))
-			return 3;
+	switch (node.eval) {
+	// arithmetic functions have a minimum number of args
+	case INTRIN_PLUS:
+	case INTRIN_MINUS:
+	case INTRIN_MUL:
+	case INTRIN_DIV:
+		return -2;
+	// all other functions have an exact number of args
+	case INTRIN_IFZERO:
+	case INTRIN_IFNEG:
+		return 3;
+	case INTRIN_PRINT:
+		return 1;
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
 	const ASTNodeIndex defunIdx = checkKnownDefun(node.name, node.parent, tree);
+
 	if (nullidx == defunIdx)
 		return max_ssize;
 
@@ -930,6 +957,7 @@ size_t getNode(
 			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_EVAL_FUN;
 			newnode.parent = parent;
+			newnode.eval = getEvalTarget(tokens[start_it].token);
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -1189,57 +1217,47 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 		return Value();
 	case ASTNODE_EVAL_VAR:
 		// scan the var stack from the top down for our var
-		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it) {
+		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it)
 			if (it->name == node.eval)
 				return it->val;
-		}
 		break;
 	case ASTNODE_EVAL_FUN:
 		// check for intrinsics first
-		switch (node.name.len) {
-		case 1:
-			if (0 == strncmp("+", node.name.ptr, 1))
-				return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
-			if (0 == strncmp("-", node.name.ptr, 1))
-				return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
-			if (0 == strncmp("*", node.name.ptr, 1))
-				return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
-			if (0 == strncmp("/", node.name.ptr, 1))
-				return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
-			break;
-		case 5:
-			if (0 == strncmp("ifneg", node.name.ptr, 5)) {
-				assert(3 == node.args.size());
-				const Value pred = eval(node.args[0], tree, stack);
+		switch (node.eval) {
+		case INTRIN_PLUS:
+			return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
+		case INTRIN_MINUS:
+			return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
+		case INTRIN_MUL:
+			return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
+		case INTRIN_DIV:
+			return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
+		case INTRIN_IFZERO:
+			assert(3 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
 
-				if (TYPE_F32 == pred.type ? 0.f > pred.f32 : 0 > pred.i32)
-					return eval(node.args[1], tree, stack);
+			if (TYPE_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
+				return eval(node.args[1], tree, stack);
 
-				return eval(node.args[2], tree, stack);
-			}
-			if (0 == strncmp("print", node.name.ptr, 5)) {
-				assert(1 == node.args.size());
-				const Value arg = eval(node.args[0], tree, stack);
+			return eval(node.args[2], tree, stack);
+		case INTRIN_IFNEG:
+			assert(3 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
 
-				if (TYPE_F32 == arg.type)
-					fprintf(stdout, "%f\n", arg.f32);
-				else
-					fprintf(stdout, "%d\n", arg.i32);
+			if (TYPE_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
+				return eval(node.args[1], tree, stack);
 
-				return arg;
-			}
-			break;
-		case 6:
-			if (0 == strncmp("ifzero", node.name.ptr, 6)) {
-				assert(3 == node.args.size());
-				const Value pred = eval(node.args[0], tree, stack);
+			return eval(node.args[2], tree, stack);
+		case INTRIN_PRINT:
+			assert(1 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
 
-				if (TYPE_F32 == pred.type ? 0.f == pred.f32 : 0 == pred.i32)
-					return eval(node.args[1], tree, stack);
+			if (TYPE_F32 == ret.type)
+				fprintf(stdout, "%f\n", ret.f32);
+			else
+				fprintf(stdout, "%d\n", ret.i32);
 
-				return eval(node.args[2], tree, stack);
-			}
-			break;
+			return ret;
 		}
 		// it's a defun -- collect all args, pushing them onto the var stack
 		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
