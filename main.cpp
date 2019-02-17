@@ -443,6 +443,7 @@ struct ASTNode {
 	};
 	ASTNodeType    type;     // semantical type of node
 	ASTNodeIndex   parent;   // parent index
+	ASTNodeIndex   eval;     // eval semantics target; used at tree evaluation
 	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
@@ -756,14 +757,14 @@ ASTNodeIndex checkKnownDefun(
 
 const ssize_t max_ssize = size_t(-1) >> 1;
 
-// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
-// if no such known function, return max ssize_t
+// return count of expected args for an AST node that is a function call; if count of args can vary, return the negated minimal count
+// if no such known function, return max ssize_t; if a function is found, patch eval target at call site
 ssize_t getMinFunArgs(
 	const ASTNodeIndex parent,
-	const ASTNodes& tree)
+	ASTNodes& tree)
 {
 	assert(nullidx != parent && parent < tree.size());
-	const ASTNode& node = tree[parent];
+	ASTNode& node = tree[parent];
 	assert(ASTNODE_EVAL_FUN == node.type);
 
 	// check built-in functions
@@ -791,11 +792,11 @@ ssize_t getMinFunArgs(
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
 	const ASTNodeIndex defunIdx = checkKnownDefun(node.name, node.parent, tree);
-	if (nullidx != defunIdx)
-		return getSubCount(true, defunIdx, tree);
+	if (nullidx == defunIdx)
+		return max_ssize;
 
-	// function not found
-	return max_ssize;
+	node.eval = defunIdx;
+	return getSubCount(true, defunIdx, tree);
 }
 
 // get the leading AST node in a token-stream span; return number of tokens encompassed; -1 if error
@@ -1023,6 +1024,7 @@ size_t getNode(
 		newnode.name = tokens[start].val;
 		newnode.type = ASTNODE_EVAL_VAR;
 		newnode.parent = parent;
+		newnode.eval = initIdx;
 		break;
 
 	default:
@@ -1080,8 +1082,8 @@ void Value::print(FILE* f) const
 }
 
 struct NamedValue {
-	StrRef name;
-	Value  val;
+	ASTNodeIndex name;
+	Value        val;
 };
 
 typedef std::vector< NamedValue > VarStack;
@@ -1181,14 +1183,14 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 		return ret;
 	case ASTNODE_INIT:
 		if (node.args.empty()) // is this a defun arg? it's already on the var stack -- just name it
-			stack[stack.size() - narg].name = node.name;
+			stack[stack.size() - narg].name = index;
 		else // this is a local var -- init it and put it on the stack
-			stack.push_back(NamedValue{ .name = node.name, .val = eval(node.args.front(), tree, stack) });
+			stack.push_back(NamedValue{ .name = index, .val = eval(node.args.front(), tree, stack) });
 		return Value();
 	case ASTNODE_EVAL_VAR:
 		// scan the var stack from the top down for our var
 		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it) {
-			if (it->name.len == node.name.len && 0 == strncmp(it->name.ptr, node.name.ptr, node.name.len))
+			if (it->name == node.eval)
 				return it->val;
 		}
 		break;
@@ -1242,10 +1244,10 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 		// it's a defun -- collect all args, pushing them onto the var stack
 		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
 			const Value arg = eval(*it, tree, stack);
-			stack.push_back(NamedValue{ .name = { .ptr = nullptr, .len = 0 }, .val = arg });
+			stack.push_back(NamedValue{ .name = nullidx, .val = arg });
 		}
 		// invoke the callee, which will pop the var stack once done
-		return eval(checkKnownDefun(node.name, node.parent, tree), tree, stack, node.args.size());
+		return eval(node.eval, tree, stack, node.args.size());
 	case ASTNODE_LITERAL_I32:
 		return Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
 	case ASTNODE_LITERAL_F32:
