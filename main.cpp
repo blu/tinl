@@ -770,7 +770,7 @@ ASTNodeIndex checkKnownDefun(
 
 	assert(parent < tree.size());
 
-	// check all parent and grand-parent let-expressions and defun-statements, as well as the dummy root node
+	// check all parent and grand-parent let-expressions and defun-statements
 	if (ASTNODE_LET == tree[parent].type) {
 		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len))
 			return parent;
@@ -1318,6 +1318,7 @@ int main(int argc, char** argv)
 	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
 	tree.push_back(root);
 
+	// collect top-level expressions/statements, registering them as root sub-nodes
 	size_t start_it = 0;
 	size_t len_it = tokens.size();
 	while (len_it) {
