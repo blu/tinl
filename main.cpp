@@ -653,7 +653,7 @@ size_t getNodeLet(
 
 		const size_t initspan = getNode(tokens, start_it, subspan_it, newnodeIdx, tree);
 
-		if (size_t(-1) == initspan) {
+		if (subspan_it != initspan) {
 			fprintf(stderr, "invalid var-init at line %d, column %d\n",
 				tokens[start_it].row,
 				tokens[start_it].col);
