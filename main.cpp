@@ -396,7 +396,7 @@ bool tokenize(
 }
 
 // Abstract Syntax Tree (AST)
-// semantical types of AST nodes
+// AST node semantical types
 enum ASTNodeType : uint16_t {
 	ASTNODE_LET,         // expression that introduces named variables via a dedicated scope
 	ASTNODE_INIT,        // statement that initializes a single named variable; appears at the beginning of 'let' expressions
@@ -426,7 +426,7 @@ const char* stringFromNodeType(const ASTNodeType t)
 	return "alien-astnode-type";
 }
 
-// AST expression return types; may also be attributed to init statements
+// AST node return types
 enum ASTReturnType : uint16_t {
 	ASTRETURN_NONE,    // return type not established
 	ASTRETURN_UNKNOWN, // runtime-resolved return type
@@ -793,8 +793,7 @@ const ssize_t max_ssize = size_t(-1) >> 1;
 // return the promoted type of the args to an arithmetic-like expression, starting from the i-th arg; rules of promotion: i32 < unknown < f32
 ASTReturnType getArgsReturnType(
 	const ASTNodeIndex parent,
-	const ASTNodes& tree,
-	const size_t first = 0)
+	const ASTNodes& tree)
 {
 	assert(nullidx != parent && parent < tree.size());
 	const ASTNode& node = tree[parent];
@@ -807,9 +806,6 @@ ASTReturnType getArgsReturnType(
 
 	// shortcut: stop iterating the args as soon as max promotion level is reached
 	for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end() && ASTRETURN_F32 != ret; ++it) {
-		if (it - node.args.begin() < first)
-			continue;
-
 		switch (tree[*it].retType) {
 		case ASTRETURN_UNKNOWN:
 			if (ASTRETURN_F32 != ret)
@@ -826,6 +822,26 @@ ASTReturnType getArgsReturnType(
 			break;
 		}
 	}
+
+	return ret;
+}
+
+// return the common type of the args to an if expression; if no common type return unknown
+ASTReturnType getIfReturnType(
+	const ASTNodeIndex parent,
+	const ASTNodes& tree)
+{
+	assert(nullidx != parent && parent < tree.size());
+	const ASTNode& node = tree[parent];
+	assert(ASTNODE_EVAL_FUN == node.type);
+
+	if (3 != node.args.size())
+		return ASTRETURN_NONE;
+
+	ASTReturnType ret = tree[node.args[1]].retType;
+
+	if (tree[node.args[2]].retType != ret)
+		ret = ASTRETURN_UNKNOWN;
 
 	return ret;
 }
@@ -862,7 +878,7 @@ ssize_t getMinFunArgs(
 		break;
 	case 5: // all other functions have an exact number of args
 		if (0 == strncmp("ifneg", node.name.ptr, 5)) {
-			tree[parent].retType = getArgsReturnType(parent, tree, 1);
+			tree[parent].retType = getIfReturnType(parent, tree);
 			return 3;
 		}
 		if (0 == strncmp("print", node.name.ptr, 5)) {
@@ -872,21 +888,20 @@ ssize_t getMinFunArgs(
 		break;
 	case 6:
 		if (0 == strncmp("ifzero", node.name.ptr, 6)) {
-			tree[parent].retType = getArgsReturnType(parent, tree, 1);
+			tree[parent].retType = getIfReturnType(parent, tree);
 			return 3;
 		}
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
 	const ASTNodeIndex defunIdx = checkKnownDefun(node.name, node.parent, tree);
-	if (nullidx != defunIdx) {
-		// patch the return type of the invocation
-		tree[parent].retType = tree[defunIdx].retType;
-		return getSubCount(true, defunIdx, tree);
-	}
 
-	// function not found
-	return max_ssize;
+	if (nullidx == defunIdx)
+		return max_ssize;
+
+	// patch the return type of the invocation
+	tree[parent].retType = tree[defunIdx].retType;
+	return getSubCount(true, defunIdx, tree);
 }
 
 // get the leading AST node in a token-stream span; return number of tokens encompassed; -1 if error
