@@ -23,8 +23,8 @@ Built-in functions
 `- arg1 arg2 {..}` -- compute arg1 - arg2 - .. - argN; promote `int` args to `float` if at least one arg is `float`  
 `* arg1 arg2 {..}` -- compute arg1 * arg2 * .. * argN; promote `int` args to `float` if at least one arg is `float`  
 `/ arg1 arg2 {..}` -- compute arg1 / arg2 / .. / argN; promote `int` args to `float` if at least one arg is `float`  
-`ifzero arg1 arg2 arg3` -- if arg1 is zero, compute arg2, otherwise compute arg3; return `int` if both arg2 and arg3 are `int`, `float` otherwise  
-`ifneg arg1 arg2 arg3` -- if arg1 is negative, compute arg2, otherwise compute arg3; return `int` if both arg2 and arg3 are `int`, `float` otherwise  
+`ifzero arg1 arg2 arg3` -- if arg1 is zero, compute arg2, otherwise compute arg3  
+`ifneg arg1 arg2 arg3` -- if arg1 is negative, compute arg2, otherwise compute arg3  
 `print arg` -- print arg and return arg; exert side-effect
 
 Misc considerations
