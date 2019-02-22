@@ -790,7 +790,7 @@ ASTNodeIndex checkKnownDefun(
 
 const ssize_t max_ssize = size_t(-1) >> 1;
 
-// return the promoted type of the args to an arithmetic-like expression, starting from the i-th arg; rules of promotion: i32 < unknown < f32
+// return the promoted type of the args to an arithmetic expression; rules of promotion: i32 < unknown < f32
 ASTReturnType getArgsReturnType(
 	const ASTNodeIndex parent,
 	const ASTNodes& tree)
