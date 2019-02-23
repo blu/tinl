@@ -4,5 +4,5 @@
 			(if (evenp n) (print 2) (print 1))
 			(foo (- n 1)))))
 
-(foo 7)
+(foo (read))
 

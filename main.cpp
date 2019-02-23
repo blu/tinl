@@ -23,7 +23,9 @@ const char* keywords[] = { // keep order in sync with Token enum below to mainta
 	"/",
 	"ifzero",
 	"ifneg",
-	"print"
+	"print",
+	"readi32",
+	"readf32"
 };
 
 // unlike keywords, a contiguous sequence of separators collapses into a single separator, which vanishes before reaching the token stream
@@ -49,6 +51,8 @@ enum Token : uint16_t { // keep order in sync with keywords above to maintain a 
 	TOKEN_IFZERO,
 	TOKEN_IFNEG,
 	TOKEN_PRINT,
+	TOKEN_READ_I32,
+	TOKEN_READ_F32,
 	// literals
 	TOKEN_LITERAL_I32,
 	TOKEN_LITERAL_F32,
@@ -83,6 +87,10 @@ const char* stringFromToken(const Token t)
 		return "TOKEN_IFNEG";
 	case TOKEN_PRINT:
 		return "TOKEN_PRINT";
+	case TOKEN_READ_I32:
+		return "TOKEN_READ_I32";
+	case TOKEN_READ_F32:
+		return "TOKEN_READ_F32";
 	case TOKEN_LITERAL_I32:
 		return "TOKEN_LITERAL_I32";
 	case TOKEN_LITERAL_F32:
@@ -465,11 +473,51 @@ struct ASTNode {
 	ASTReturnType  retType;  // return type of node
 	ASTNodeType    type;     // semantical type of node
 	ASTNodeIndex   parent;   // parent index
-	ASTNodeIndices args;     // per argument/sub-expression index; last sub-expression is the one returned
+	ASTNodeIndex   eval;     // eval semantics target
+	ASTNodeIndices args;     // per argument/sub-expression index
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
 	bool isDefun() const { return ASTNODE_LET == type && name.ptr; }
 };
+
+// special eval targets for built-in functions, AKA intrinsics
+enum : ASTNodeIndex {
+	INTRIN_PLUS     = ASTNodeIndex(-2),
+	INTRIN_MINUS    = ASTNodeIndex(-3),
+	INTRIN_MUL      = ASTNodeIndex(-4),
+	INTRIN_DIV      = ASTNodeIndex(-5),
+	INTRIN_IFZERO   = ASTNodeIndex(-6),
+	INTRIN_IFNEG    = ASTNodeIndex(-7),
+	INTRIN_PRINT    = ASTNodeIndex(-8),
+	INTRIN_READ_I32 = ASTNodeIndex(-9),
+	INTRIN_READ_F32 = ASTNodeIndex(-10)
+};
+
+ASTNodeIndex getEvalTarget(const Token token)
+{
+	switch (token) {
+	case TOKEN_PLUS:
+		return INTRIN_PLUS;
+	case TOKEN_MINUS:
+		return INTRIN_MINUS;
+	case TOKEN_MUL:
+		return INTRIN_MUL;
+	case TOKEN_DIV:
+		return INTRIN_DIV;
+	case TOKEN_IFZERO:
+		return INTRIN_IFZERO;
+	case TOKEN_IFNEG:
+		return INTRIN_IFNEG;
+	case TOKEN_PRINT:
+		return INTRIN_PRINT;
+	case TOKEN_READ_I32:
+		return INTRIN_READ_I32;
+	case TOKEN_READ_F32:
+		return INTRIN_READ_F32;
+	}
+
+	return nullidx;
+}
 
 void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const
 {
@@ -772,9 +820,9 @@ ASTNodeIndex checkKnownDefun(
 
 	// check all parent and grand-parent let-expressions and defun-statements
 	if (ASTNODE_LET == tree[parent].type) {
-		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len)) {
+		if (name.len == tree[parent].name.len && 0 == strncmp(tree[parent].name.ptr, name.ptr, name.len))
 			return parent;
-		}
+
 		// check all defun-sub-nodes of this (grand) parent
 		for (ASTNodeIndices::const_iterator it = tree[parent].args.begin(); it != tree[parent].args.end(); ++it) {
 			if (ASTNODE_LET != tree[*it].type)
@@ -819,6 +867,7 @@ ASTReturnType getArgsReturnType(
 			ret = ASTRETURN_F32;
 			break;
 		default:
+			assert(false);
 			break;
 		}
 	}
@@ -846,51 +895,39 @@ ASTReturnType getIfReturnType(
 	return ret;
 }
 
-// return count of expected args for an AST node that is a function call; if count of args can vary, return minimal expected count, negated
+// return count of expected args for an AST node that is a function call; if count of args can vary, return the negated minimal count
 // if no such known function, return max ssize_t; if a function is found, update the return type of the invocation to the one of the function
 ssize_t getMinFunArgs(
 	const ASTNodeIndex parent,
 	ASTNodes& tree)
 {
 	assert(nullidx != parent && parent < tree.size());
-	const ASTNode& node = tree[parent];
+	ASTNode& node = tree[parent];
 	assert(ASTNODE_EVAL_FUN == node.type);
 
-	// check built-in functions; patch the return type of the invocation
-	switch (node.name.len) {
-	case 1: // arithmetic functions have a minimum number of args
-		if (0 == strncmp("+", node.name.ptr, 1)) {
-			tree[parent].retType = getArgsReturnType(parent, tree);
-			return -2;
-		}
-		if (0 == strncmp("-", node.name.ptr, 1)) {
-			tree[parent].retType = getArgsReturnType(parent, tree);
-			return -2;
-		}
-		if (0 == strncmp("*", node.name.ptr, 1)) {
-			tree[parent].retType = getArgsReturnType(parent, tree);
-			return -2;
-		}
-		if (0 == strncmp("/", node.name.ptr, 1)) {
-			tree[parent].retType = getArgsReturnType(parent, tree);
-			return -2;
-		}
-		break;
-	case 5: // all other functions have an exact number of args
-		if (0 == strncmp("ifneg", node.name.ptr, 5)) {
-			tree[parent].retType = getIfReturnType(parent, tree);
-			return 3;
-		}
-		if (0 == strncmp("print", node.name.ptr, 5)) {
-			tree[parent].retType = getArgsReturnType(parent, tree);
-			return 1;
-		}
-		break;
-	case 6:
-		if (0 == strncmp("ifzero", node.name.ptr, 6)) {
-			tree[parent].retType = getIfReturnType(parent, tree);
-			return 3;
-		}
+	// check built-in functions
+	switch (node.eval) {
+	// arithmetic functions have a minimum number of args
+	case INTRIN_PLUS:
+	case INTRIN_MINUS:
+	case INTRIN_MUL:
+	case INTRIN_DIV:
+		node.retType = getArgsReturnType(parent, tree);
+		return -2;
+	// all other functions have an exact number of args
+	case INTRIN_IFZERO:
+	case INTRIN_IFNEG:
+		node.retType = getIfReturnType(parent, tree);
+		return 3;
+	case INTRIN_PRINT:
+		node.retType = tree[node.args.front()].retType;
+		return 1;
+	case INTRIN_READ_I32:
+		node.retType = ASTRETURN_I32;
+		return 0;
+	case INTRIN_READ_F32:
+		node.retType = ASTRETURN_F32;
+		return 0;
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
@@ -899,8 +936,9 @@ ssize_t getMinFunArgs(
 	if (nullidx == defunIdx)
 		return max_ssize;
 
-	// patch the return type of the invocation
-	tree[parent].retType = tree[defunIdx].retType;
+	// patch the return type and eval target of the invocation
+	node.retType = tree[defunIdx].retType;
+	node.eval = defunIdx;
 	return getSubCount(true, defunIdx, tree);
 }
 
@@ -975,7 +1013,7 @@ size_t getNode(
 
 			// node introduces a named scope
 			newnode.name = tokens[start_it].val;
-			newnode.retType = ASTRETURN_NONE;
+			newnode.retType = ASTRETURN_UNKNOWN;
 			newnode.type = ASTNODE_LET;
 			newnode.parent = parent;
 
@@ -1033,11 +1071,14 @@ size_t getNode(
 		case TOKEN_IFZERO:
 		case TOKEN_IFNEG:
 		case TOKEN_PRINT:
+		case TOKEN_READ_I32:
+		case TOKEN_READ_F32:
 		case TOKEN_IDENTIFIER:
 			newnode.name = tokens[start_it].val;
 			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_EVAL_FUN;
 			newnode.parent = parent;
+			newnode.eval = getEvalTarget(tokens[start_it].token);
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -1048,6 +1089,9 @@ size_t getNode(
 			break;
 
 		default:
+			fprintf(stderr, "unexpected token at line %d, column %d\n",
+				tokens[start].row,
+				tokens[start].col);
 			return size_t(-1);
 		}
 
@@ -1140,9 +1184,13 @@ size_t getNode(
 		newnode.retType = tree[initIdx].retType;
 		newnode.type = ASTNODE_EVAL_VAR;
 		newnode.parent = parent;
+		newnode.eval = initIdx;
 		break;
 
 	default:
+		fprintf(stderr, "unexpected token at line %d, column %d\n",
+			tokens[start].row,
+			tokens[start].col);
 		return size_t(-1);
 	}
 
@@ -1211,8 +1259,7 @@ int main(int argc, char** argv)
 
 	// root expression must return something
 	if (0 == getSubCount(false, 0, tree)) {
-		fprintf(stderr, "root expression does not return\n");
-		fprintf(stdout, "failure\n");
+		fprintf(stderr, "root expression does not return\nfailure\n");
 		return -1;
 	}
 
