@@ -1,7 +1,9 @@
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+
 #include <vector>
 
 // keywords are reserved words that are counted as separate tokens; we make no distinction between keywords and operators; keyword prefix disambiguation
@@ -23,7 +25,9 @@ const char* keywords[] = { // keep order in sync with Token enum below to mainta
 	"/",
 	"ifzero",
 	"ifneg",
-	"print"
+	"print",
+	"readi32",
+	"readf32"
 };
 
 // unlike keywords, a contiguous sequence of separators collapses into a single separator, which vanishes before reaching the token stream
@@ -49,6 +53,8 @@ enum Token : uint16_t { // keep order in sync with keywords above to maintain a 
 	TOKEN_IFZERO,
 	TOKEN_IFNEG,
 	TOKEN_PRINT,
+	TOKEN_READ_I32,
+	TOKEN_READ_F32,
 	// literals
 	TOKEN_LITERAL_I32,
 	TOKEN_LITERAL_F32,
@@ -83,6 +89,10 @@ const char* stringFromToken(const Token t)
 		return "TOKEN_IFNEG";
 	case TOKEN_PRINT:
 		return "TOKEN_PRINT";
+	case TOKEN_READ_I32:
+		return "TOKEN_READ_I32";
+	case TOKEN_READ_F32:
+		return "TOKEN_READ_F32";
 	case TOKEN_LITERAL_I32:
 		return "TOKEN_LITERAL_I32";
 	case TOKEN_LITERAL_F32:
@@ -396,7 +406,7 @@ bool tokenize(
 }
 
 // Abstract Syntax Tree (AST)
-// kinds of AST nodes
+// AST node semantical types
 enum ASTNodeType : uint16_t {
 	ASTNODE_LET,         // expression that introduces named variables via a dedicated scope
 	ASTNODE_INIT,        // statement that initializes a single named variable; appears at the beginning of 'let' expressions
@@ -452,13 +462,15 @@ struct ASTNode {
 
 // special eval targets for built-in functions, AKA intrinsics
 enum : ASTNodeIndex {
-	INTRIN_PLUS   = ASTNodeIndex(-2),
-	INTRIN_MINUS  = ASTNodeIndex(-3),
-	INTRIN_MUL    = ASTNodeIndex(-4),
-	INTRIN_DIV    = ASTNodeIndex(-5),
-	INTRIN_IFZERO = ASTNodeIndex(-6),
-	INTRIN_IFNEG  = ASTNodeIndex(-7),
-	INTRIN_PRINT  = ASTNodeIndex(-8)
+	INTRIN_PLUS     = ASTNodeIndex(-2),
+	INTRIN_MINUS    = ASTNodeIndex(-3),
+	INTRIN_MUL      = ASTNodeIndex(-4),
+	INTRIN_DIV      = ASTNodeIndex(-5),
+	INTRIN_IFZERO   = ASTNodeIndex(-6),
+	INTRIN_IFNEG    = ASTNodeIndex(-7),
+	INTRIN_PRINT    = ASTNodeIndex(-8),
+	INTRIN_READ_I32 = ASTNodeIndex(-9),
+	INTRIN_READ_F32 = ASTNodeIndex(-10)
 };
 
 ASTNodeIndex getEvalTarget(const Token token)
@@ -478,6 +490,10 @@ ASTNodeIndex getEvalTarget(const Token token)
 		return INTRIN_IFNEG;
 	case TOKEN_PRINT:
 		return INTRIN_PRINT;
+	case TOKEN_READ_I32:
+		return INTRIN_READ_I32;
+	case TOKEN_READ_F32:
+		return INTRIN_READ_F32;
 	}
 
 	return nullidx;
@@ -814,6 +830,9 @@ ssize_t getMinFunArgs(
 		return 3;
 	case INTRIN_PRINT:
 		return 1;
+	case INTRIN_READ_I32:
+	case INTRIN_READ_F32:
+		return 0;
 	}
 
 	// check the upper tree for a matching defun; at a match an exact number of args is returned
@@ -822,6 +841,7 @@ ssize_t getMinFunArgs(
 	if (nullidx == defunIdx)
 		return max_ssize;
 
+	// patch the eval target of the invocation
 	node.eval = defunIdx;
 	return getSubCount(true, defunIdx, tree);
 }
@@ -953,6 +973,8 @@ size_t getNode(
 		case TOKEN_IFZERO:
 		case TOKEN_IFNEG:
 		case TOKEN_PRINT:
+		case TOKEN_READ_I32:
+		case TOKEN_READ_F32:
 		case TOKEN_IDENTIFIER:
 			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_EVAL_FUN;
@@ -968,6 +990,9 @@ size_t getNode(
 			break;
 
 		default:
+			fprintf(stderr, "unexpected token at line %d, column %d\n",
+				tokens[start].row,
+				tokens[start].col);
 			return size_t(-1);
 		}
 
@@ -1056,6 +1081,9 @@ size_t getNode(
 		break;
 
 	default:
+		fprintf(stderr, "unexpected token at line %d, column %d\n",
+			tokens[start].row,
+			tokens[start].col);
 		return size_t(-1);
 	}
 
@@ -1190,6 +1218,21 @@ T binop_mul(T a, T b) { return a * b; }
 template < typename T >
 T binop_div(T a, T b) { return a / b; }
 
+template < typename T >
+T read(const char* prompt, const char* format)
+{
+	T ret;
+
+	fprintf(stdout, prompt);
+
+	if (1 != fscanf(stdin, format, &ret)) {
+		fprintf(stderr, "runtime error: invalid input\n");
+		exit(-1); // runtime input error
+	}
+
+	return ret;
+}
+
 Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
 {
 	assert(nullidx != index && index < tree.size());
@@ -1258,6 +1301,10 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 				fprintf(stdout, "%d\n", ret.i32);
 
 			return ret;
+		case INTRIN_READ_I32:
+			return Value{ .type = TYPE_I32, .i32 = read<int32_t>("i: ", "%d") };
+		case INTRIN_READ_F32:
+			return Value{ .type = TYPE_F32, .f32 = read<float>("f: ", "%f") };
 		}
 		// it's a defun -- collect all args, pushing them onto the var stack
 		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
@@ -1335,8 +1382,7 @@ int main(int argc, char** argv)
 
 	// root expression must return something
 	if (0 == getSubCount(false, 0, tree)) {
-		fprintf(stderr, "root expression does not return\n");
-		fprintf(stdout, "failure\n");
+		fprintf(stderr, "root expression does not return\nfailure\n");
 		return -1;
 	}
 

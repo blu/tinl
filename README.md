@@ -5,7 +5,7 @@ Description
 
 * no lists
 * no array, vector, string or function types -- just scalars
-* no custom types -- only built-in types
+* no *defstruct* structured types either
 * no *set/setq/setf* forms -- variable initializations are effectively Single Static Assignments (SSA)
 * no quoted expressions
 * no lambdas
@@ -13,7 +13,7 @@ Description
 * no bignum numeric type -- only fixed-bitness integers
 * no rational numeric type -- only floating-point fractions
 * no binary or octal literals -- only decimal and hexidecimal (via *0x* prefix)
-* no predicate forms -- *ifzero/ifneg expr then-expr else-expr* instead
+* no T/NIL predicate forms -- *ifzero/ifneg expr then-expr else-expr* instead
 * no *dotimes* et al loop forms -- loops only via recursion
 
 Built-in functions
@@ -25,7 +25,8 @@ Built-in functions
 `/ arg1 arg2 {..}` -- compute arg1 / arg2 / .. / argN; promote `int` args to `float` if at least one arg is `float`  
 `ifzero arg1 arg2 arg3` -- if arg1 is zero, compute arg2, otherwise compute arg3  
 `ifneg arg1 arg2 arg3` -- if arg1 is negative, compute arg2, otherwise compute arg3  
-`print arg` -- print arg and return arg; exert side-effect
+`print arg` -- print arg and return arg; exert side-effect  
+`readi32`, `readf32` -- read a scalar of the respective type from stdin
 
 Interpreter considerations
 --------------------------
@@ -54,8 +55,3 @@ TINL:
 	(defun fib(x y n)
 		(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
 ```
-
-To Do
------
-
-Read numeric input from stdin.
