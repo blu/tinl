@@ -1,5 +1,10 @@
-(defun isEq(x y)
-	(let ((diff (- x y))) (ifzero diff 1 0)))
-(defun isLessEq(x y)
-	(let ((diff (- x y))) (ifneg diff 1 (ifzero diff 1 0))))
-(+ (* (isEq 42 42.0) (isLessEq 42 43.0)) (* (isEq 41 42) 10) (* (isLessEq 42 41) 100))
+(defun evenz(x)
+	(- x (* (/ x 2) 2)))
+
+(defun foo(n)
+	(ifzero n 0
+		(let ()
+			(ifzero (evenz n) (print 2) (print 1))
+			(foo (- n 1)))))
+
+(foo 7)
