@@ -962,7 +962,7 @@ size_t getNode(
 		return size_t(-1);
 	}
 
-	ASTNode newnode;
+	ASTNode newnode = { .parent = parent };
 	const ASTNodeIndex newnodeIdx = tree.size();
 
 	// check for parenthesized expressions like function calls and scopes
@@ -1015,7 +1015,6 @@ size_t getNode(
 			newnode.name = tokens[start_it].val;
 			newnode.retType = ASTRETURN_UNKNOWN;
 			newnode.type = ASTNODE_LET;
-			newnode.parent = parent;
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -1044,7 +1043,6 @@ size_t getNode(
 			newnode.name.len = 0;
 			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_LET;
-			newnode.parent = parent;
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -1077,7 +1075,6 @@ size_t getNode(
 			newnode.name = tokens[start_it].val;
 			newnode.retType = ASTRETURN_NONE;
 			newnode.type = ASTNODE_EVAL_FUN;
-			newnode.parent = parent;
 			newnode.eval = getEvalTarget(tokens[start_it].token);
 
 			tree.push_back(newnode);
@@ -1122,7 +1119,6 @@ size_t getNode(
 			}
 			// return type copied from last sub-expression
 			for (it = tree[newnodeIdx].args.rbegin(); it != tree[newnodeIdx].args.rend() && tree[*it].isDefun(); ++it) {}
-
 			tree[newnodeIdx].retType = tree[*it].retType;
 			break;
 		case ASTNODE_EVAL_FUN:
@@ -1159,14 +1155,12 @@ size_t getNode(
 		newnode.literal_i32 = tokens[start].literal_i32;
 		newnode.retType = ASTRETURN_I32;
 		newnode.type = ASTNODE_LITERAL;
-		newnode.parent = parent;
 		break;
 
 	case TOKEN_LITERAL_F32:
 		newnode.literal_f32 = tokens[start].literal_f32;
 		newnode.retType = ASTRETURN_F32;
 		newnode.type = ASTNODE_LITERAL;
-		newnode.parent = parent;
 		break;
 
 	case TOKEN_IDENTIFIER:
@@ -1183,7 +1177,6 @@ size_t getNode(
 		newnode.name = tokens[start].val;
 		newnode.retType = tree[initIdx].retType;
 		newnode.type = ASTNODE_EVAL_VAR;
-		newnode.parent = parent;
 		newnode.eval = initIdx;
 		break;
 
