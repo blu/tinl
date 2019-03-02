@@ -1,0 +1,10 @@
+(defun fac(n)
+	(ifzero n 1 (* n (fac (- n 1)))))
+
+(defun bench(n)
+	(ifzero n 0
+		(let ()
+			(fac 13)
+			(bench (- n 1)))))
+
+(bench 100000)

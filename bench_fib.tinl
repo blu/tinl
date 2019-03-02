@@ -1,0 +1,10 @@
+(defun fib(x y n)
+	(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
+
+(defun bench(n)
+	(ifzero n 0
+		(let ()
+			(fib 1 1 44)
+			(bench (- n 1)))))
+
+(bench 100000)

@@ -408,7 +408,7 @@ bool tokenize(
 // Abstract Syntax Tree (AST)
 // AST node semantical types
 enum ASTNodeType : uint16_t {
-	ASTNODE_LET,         // expression that introduces named variables via a dedicated scope
+	ASTNODE_LET,         // expression that introduces named variables via a nested scope
 	ASTNODE_INIT,        // statement that initializes a single named variable; appears at the beginning of 'let' expressions
 	ASTNODE_EVAL_VAR,    // variable evaluation expression
 	ASTNODE_EVAL_FUN,    // function evaluation expression
@@ -653,10 +653,9 @@ size_t getNodeLet(
 		span_it -= subspan;
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
-		ASTNode newnode;
+		ASTNode newnode = { .parent = parent };
 		newnode.name = tokens[start_it].val;
 		newnode.type = ASTNODE_INIT;
-		newnode.parent = parent;
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -728,10 +727,9 @@ size_t getNodeDefun(
 			return size_t(-1);
 		}
 
-		ASTNode newnode;
+		ASTNode newnode = { .parent = parent };
 		newnode.name = tokens[start_it].val;
 		newnode.type = ASTNODE_INIT;
-		newnode.parent = parent;
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -866,7 +864,7 @@ size_t getNode(
 		return size_t(-1);
 	}
 
-	ASTNode newnode;
+	ASTNode newnode = { .parent = parent };
 	const ASTNodeIndex newnodeIdx = tree.size();
 
 	// check for parenthesized expressions like function calls and scopes
@@ -918,7 +916,6 @@ size_t getNode(
 			// node introduces a named scope
 			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_LET;
-			newnode.parent = parent;
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -946,7 +943,6 @@ size_t getNode(
 			newnode.name.ptr = nullptr;
 			newnode.name.len = 0;
 			newnode.type = ASTNODE_LET;
-			newnode.parent = parent;
 
 			tree.push_back(newnode);
 			tree[parent].args.push_back(newnodeIdx);
@@ -978,7 +974,6 @@ size_t getNode(
 		case TOKEN_IDENTIFIER:
 			newnode.name = tokens[start_it].val;
 			newnode.type = ASTNODE_EVAL_FUN;
-			newnode.parent = parent;
 			newnode.eval = getEvalTarget(tokens[start_it].token);
 
 			tree.push_back(newnode);
@@ -1054,13 +1049,11 @@ size_t getNode(
 	case TOKEN_LITERAL_I32:
 		newnode.literal_i32 = tokens[start].literal_i32;
 		newnode.type = ASTNODE_LITERAL_I32;
-		newnode.parent = parent;
 		break;
 
 	case TOKEN_LITERAL_F32:
 		newnode.literal_f32 = tokens[start].literal_f32;
 		newnode.type = ASTNODE_LITERAL_F32;
-		newnode.parent = parent;
 		break;
 
 	case TOKEN_IDENTIFIER:
@@ -1076,7 +1069,6 @@ size_t getNode(
 
 		newnode.name = tokens[start].val;
 		newnode.type = ASTNODE_EVAL_VAR;
-		newnode.parent = parent;
 		newnode.eval = initIdx;
 		break;
 
@@ -1233,64 +1225,103 @@ T read(const char* prompt, const char* format)
 	return ret;
 }
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
+Value eval(ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
 {
-	assert(nullidx != index && index < tree.size());
-	const ASTNode& node = tree[index];
 	const uint32_t narg = 0 < nargs ? nargs : 0;
 	const size_t stackRestore = stack.size() - narg;
-	Value ret;
+	Value ret = Value{ .type = TYPE_F32, .f32 = 0.f / 0 };
+	bool last = false;
+
+tco:
+	assert(nullidx != index && index < tree.size());
+	const ASTNode& node = tree[index];
 
 	switch (node.type) {
 	case ASTNODE_LET:
+		index = 0; // root index cannot be a child, so it's as good an invalid value as any
 		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
 			if (tree[*it].isDefun())
 				continue;
 
-			ret = eval(*it, tree, stack, nargs--);
+			// the last expression will be TCO'd -- eval the rest
+			if (index)
+				ret = eval(index, tree, stack, nargs--);
+
+			index = *it;
 		}
-		// pop args/locals from the var stack
-		stack.resize(stackRestore);
-		return ret;
+		last = true;
+		goto tco;
 	case ASTNODE_INIT:
 		if (node.args.empty()) // is this a defun arg? it's already on the var stack -- just name it
 			stack[stack.size() - narg].name = index;
 		else // this is a local var -- init it and put it on the stack
 			stack.push_back(NamedValue{ .name = index, .val = eval(node.args.front(), tree, stack) });
-		return Value();
+
+		// nothing to return, just don't pop the stack
+		return ret;
 	case ASTNODE_EVAL_VAR:
 		// scan the var stack from the top down for our var
 		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it)
-			if (it->name == node.eval)
-				return it->val;
+			if (it->name == node.eval) {
+				ret = it->val;
+				break;
+			}
 		break;
 	case ASTNODE_EVAL_FUN:
 		// check for intrinsics first
 		switch (node.eval) {
 		case INTRIN_PLUS:
-			return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
+			ret = evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
+			break;
 		case INTRIN_MINUS:
-			return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
+			ret = evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
+			break;
 		case INTRIN_MUL:
-			return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
+			ret = evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
+			break;
 		case INTRIN_DIV:
-			return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
+			ret = evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
+			break;
 		case INTRIN_IFZERO:
 			assert(3 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
 
-			if (TYPE_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
-				return eval(node.args[1], tree, stack);
+			if (last) { // when if-expression is last, TCO whichever branch we take
+				if (TYPE_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
+					index = node.args[1];
+				else
+					index = node.args[2];
 
-			return eval(node.args[2], tree, stack);
+				goto tco;
+			}
+
+			if (TYPE_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32) {
+				ret = eval(node.args[1], tree, stack);
+				break;
+			}
+
+			ret = eval(node.args[2], tree, stack);
+			break;
 		case INTRIN_IFNEG:
 			assert(3 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
 
-			if (TYPE_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
-				return eval(node.args[1], tree, stack);
+			if (last) { // when if-expression is last, TCO whichever branch we take
+				if (TYPE_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
+					index = node.args[1];
+				else
+					index = node.args[2];
 
-			return eval(node.args[2], tree, stack);
+				goto tco;
+			}
+
+			if (TYPE_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32) {
+				ret = eval(node.args[1], tree, stack);
+				break;
+			}
+
+			ret = eval(node.args[2], tree, stack);
+			break;
 		case INTRIN_PRINT:
 			assert(1 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
@@ -1300,27 +1331,42 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 			else
 				fprintf(stdout, "%d\n", ret.i32);
 
-			return ret;
+			break;
 		case INTRIN_READ_I32:
-			return Value{ .type = TYPE_I32, .i32 = read<int32_t>("i: ", "%d") };
+			ret = Value{ .type = TYPE_I32, .i32 = read<int32_t>("i: ", "%d") };
+			break;
 		case INTRIN_READ_F32:
-			return Value{ .type = TYPE_F32, .f32 = read<float>("f: ", "%f") };
+			ret = Value{ .type = TYPE_F32, .f32 = read<float>("f: ", "%f") };
+			break;
+		default:
+			// it's a defun -- collect all args, pushing them onto the var stack
+			for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
+				const Value arg = eval(*it, tree, stack);
+				stack.push_back(NamedValue{ .name = nullidx, .val = arg });
+			}
+
+			if (last) { // keep leaking var stack during TCO sequences, until first return from a sequence
+				index = node.eval;
+				nargs = node.args.size();
+				goto tco;
+			}
+
+			// invoke the callee, which will pop the var stack once done
+			ret = eval(node.eval, tree, stack, node.args.size());
+			break;
 		}
-		// it's a defun -- collect all args, pushing them onto the var stack
-		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
-			const Value arg = eval(*it, tree, stack);
-			stack.push_back(NamedValue{ .name = nullidx, .val = arg });
-		}
-		// invoke the callee, which will pop the var stack once done
-		return eval(node.eval, tree, stack, node.args.size());
+		break;
 	case ASTNODE_LITERAL_I32:
-		return Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
+		ret = Value{ .type = TYPE_I32, .i32 = node.literal_i32 };
+		break;
 	case ASTNODE_LITERAL_F32:
-		return Value{ .type = TYPE_F32, .f32 = node.literal_f32 };
+		ret = Value{ .type = TYPE_F32, .f32 = node.literal_f32 };
+		break;
 	}
 
-	assert(false);
-	return Value{ .type = TYPE_F32, .f32 = 0.f / 0 };
+	// pop args/locals from the var stack
+	stack.resize(stackRestore);
+	return ret;
 }
 
 int main(int argc, char** argv)
@@ -1367,9 +1413,9 @@ int main(int argc, char** argv)
 
 	// collect top-level expressions/statements, registering them as root sub-nodes
 	size_t start_it = 0;
-	size_t len_it = tokens.size();
-	while (len_it) {
-		const size_t span = getNode(tokens, start_it, len_it, 0, tree);
+	size_t span_it = tokens.size();
+	while (span_it) {
+		const size_t span = getNode(tokens, start_it, span_it, 0, tree);
 
 		if (size_t(-1) == span) {
 			fprintf(stdout, "failure\n");
@@ -1377,7 +1423,7 @@ int main(int argc, char** argv)
 		}
 
 		start_it += span;
-		len_it -= span;
+		span_it -= span;
 	}
 
 	// root expression must return something
@@ -1394,6 +1440,7 @@ int main(int argc, char** argv)
 
 	// evaluate AST and print result
 	VarStack stack;
+	stack.reserve(1024);
 	const Value res = eval(0, tree, stack);
 	res.print(stdout);
 
