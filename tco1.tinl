@@ -1,0 +1,5 @@
+(let ((x 42))
+	(defun foo(arg)
+		(let ((x arg)) x))
+	(foo 41)
+	(foo x))

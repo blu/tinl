@@ -1,0 +1,4 @@
+(defun foo(x)
+	(let ((y x)) (ifzero y 0 (foo (- (print y) 1)))))
+
+(foo 11)
