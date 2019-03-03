@@ -406,7 +406,7 @@ bool tokenize(
 // Abstract Syntax Tree (AST)
 // AST node semantical types
 enum ASTNodeType : uint16_t {
-	ASTNODE_LET,         // expression that introduces named variables via a dedicated scope
+	ASTNODE_LET,         // expression that introduces named variables via a nested scope
 	ASTNODE_INIT,        // statement that initializes a single named variable; appears at the beginning of 'let' expressions
 	ASTNODE_EVAL_VAR,    // variable evaluation expression
 	ASTNODE_EVAL_FUN,    // function evaluation expression

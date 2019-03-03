@@ -1,7 +1,7 @@
 Description
 -----------
 
-*This is Not Lisp* (**TINL**; proncounced *tai-nul*) is a minimalistic LISP-like language, using familiar s-expressions with essential restrictions:
+*This is Not Lisp* (**TINL**, proncounced *tai-nul*) is a minimalistic LISP-like language, using familiar s-expressions with essential restrictions:
 
 * no lists
 * no array, vector, string or function types -- just scalars
