@@ -680,11 +680,7 @@ size_t getNodeLet(
 		span_it -= subspan;
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
-		ASTNode newnode;
-		newnode.name = tokens[start_it].val;
-		newnode.retType = ASTRETURN_NONE;
-		newnode.type = ASTNODE_INIT;
-		newnode.parent = parent;
+		ASTNode newnode = { .name = tokens[start_it].val, .retType = ASTRETURN_NONE, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -759,11 +755,7 @@ size_t getNodeDefun(
 			return size_t(-1);
 		}
 
-		ASTNode newnode;
-		newnode.name = tokens[start_it].val;
-		newnode.retType = ASTRETURN_UNKNOWN;
-		newnode.type = ASTNODE_INIT;
-		newnode.parent = parent;
+		ASTNode newnode = { .name = tokens[start_it].val, .retType = ASTRETURN_UNKNOWN, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
