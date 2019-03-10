@@ -653,9 +653,7 @@ size_t getNodeLet(
 		span_it -= subspan;
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
-		ASTNode newnode = { .parent = parent };
-		newnode.name = tokens[start_it].val;
-		newnode.type = ASTNODE_INIT;
+		ASTNode newnode = { .name = tokens[start_it].val, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -727,9 +725,7 @@ size_t getNodeDefun(
 			return size_t(-1);
 		}
 
-		ASTNode newnode = { .parent = parent };
-		newnode.name = tokens[start_it].val;
-		newnode.type = ASTNODE_INIT;
+		ASTNode newnode = { .name = tokens[start_it].val, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -1192,10 +1188,9 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 		}
 	}
 
-	if (isF32)
-		return Value{ .type = TYPE_F32, { .f32 = acc_f32 } }; // enclose anonymous union to workaround clang bug
-
-	return Value{ .type = TYPE_I32, { .i32 = acc_i32 } }; // enclose anonymous union to workaround clang bug
+	return isF32
+		? Value{ .type = TYPE_F32, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
+		: Value{ .type = TYPE_I32, { .i32 = acc_i32 } };
 }
 
 template < typename T >
@@ -1268,7 +1263,6 @@ tco:
 			}
 		break;
 	case ASTNODE_EVAL_FUN:
-		// check for intrinsics first
 		switch (node.eval) {
 		case INTRIN_PLUS:
 			ret = evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
