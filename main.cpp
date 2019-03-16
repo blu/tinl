@@ -527,7 +527,7 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 		fprintf(f, "%s: %f\n", stringType, literal_f32);
 		break;
 	default:
-		fprintf(f, "%s\n", stringType);
+		assert(false);
 		break;
 	}
 
