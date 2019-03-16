@@ -2,6 +2,7 @@
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
+
 #include <vector>
 
 // keywords are reserved words that are counted as separate tokens; we make no distinction between keywords and operators; keyword prefix disambiguation
@@ -437,9 +438,9 @@ const char* stringFromNodeType(const ASTNodeType t)
 // AST node return types
 enum ASTReturnType : uint16_t {
 	ASTRETURN_NONE,    // return type not established
-	ASTRETURN_UNKNOWN, // runtime-resolved return type
 	ASTRETURN_I32,     // 32-bit signed integer
-	ASTRETURN_F32      // 32-bit floating point
+	ASTRETURN_F32,     // 32-bit floating point
+	ASTRETURN_UNKNOWN  // superposition
 };
 
 const char* stringFromReturnType(const ASTReturnType t)
@@ -447,12 +448,12 @@ const char* stringFromReturnType(const ASTReturnType t)
 	switch (t) {
 	case ASTRETURN_NONE:
 		return "none";
-	case ASTRETURN_UNKNOWN:
-		return "unknown";
 	case ASTRETURN_I32:
 		return "i32";
 	case ASTRETURN_F32:
 		return "f32";
+	case ASTRETURN_UNKNOWN:
+		return "unknown";
 	}
 
 	return "alien-return-type";
@@ -470,7 +471,7 @@ struct ASTNode {
 		int32_t literal_i32; // value of integral literal
 		float   literal_f32; // value of floating-point literal
 	};
-	ASTReturnType  retType;  // return type of node
+	ASTReturnType  rtype;    // return type of node at evaluation
 	ASTNodeType    type;     // semantical type of node
 	ASTNodeIndex   parent;   // parent index
 	ASTNodeIndex   eval;     // eval semantics target
@@ -530,23 +531,23 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 	case ASTNODE_LET:
 		assert(name.ptr && name.len || !name.ptr && !name.len);
 		if (name.ptr)
-			fprintf(f, "%s: %s %.*s\n", stringType, stringFromReturnType(retType), name.len, name.ptr);
+			fprintf(f, "%s: %s %.*s\n", stringType, stringFromReturnType(rtype), name.len, name.ptr);
 		else
-			fprintf(f, "%s: %s\n", stringType, stringFromReturnType(retType));
+			fprintf(f, "%s: %s\n", stringType, stringFromReturnType(rtype));
 		break;
 	case ASTNODE_INIT:
 	case ASTNODE_EVAL_VAR:
 	case ASTNODE_EVAL_FUN:
 		assert(name.ptr && name.len);
-		fprintf(f, "%s: %s %.*s\n", stringType, stringFromReturnType(retType), name.len, name.ptr);
+		fprintf(f, "%s: %s %.*s\n", stringType, stringFromReturnType(rtype), name.len, name.ptr);
 		break;
 	case ASTNODE_LITERAL:
-		switch (retType) {
+		switch (rtype) {
 		case ASTRETURN_I32:
-			fprintf(f, "%s: %s %d\n", stringType, stringFromReturnType(ASTRETURN_I32), literal_i32);
+			fprintf(f, "%s: %s %d\n", stringType, stringFromReturnType(rtype), literal_i32);
 			break;
 		case ASTRETURN_F32:
-			fprintf(f, "%s: %s %f\n", stringType, stringFromReturnType(ASTRETURN_F32), literal_f32);
+			fprintf(f, "%s: %s %f\n", stringType, stringFromReturnType(rtype), literal_f32);
 			break;
 		default:
 			assert(false);
@@ -554,7 +555,7 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 		}
 		break;
 	default:
-		fprintf(f, "%s: %s\n", stringType, stringFromReturnType(retType));
+		assert(false);
 		break;
 	}
 
@@ -680,7 +681,7 @@ size_t getNodeLet(
 		span_it -= subspan;
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
-		ASTNode newnode = { .name = tokens[start_it].val, .retType = ASTRETURN_NONE, .type = ASTNODE_INIT, .parent = parent };
+		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_NONE, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -701,7 +702,7 @@ size_t getNodeLet(
 		}
 
 		// update the return type of the init statement
-		tree[newnodeIdx].retType = tree[tree[newnodeIdx].args.front()].retType;
+		tree[newnodeIdx].rtype = tree[tree[newnodeIdx].args.front()].rtype;
 
 		start_it += initspan + 1; // account for right parenthesis
 		assert(subspan_it == initspan);
@@ -755,7 +756,7 @@ size_t getNodeDefun(
 			return size_t(-1);
 		}
 
-		ASTNode newnode = { .name = tokens[start_it].val, .retType = ASTRETURN_UNKNOWN, .type = ASTNODE_INIT, .parent = parent };
+		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_UNKNOWN, .type = ASTNODE_INIT, .parent = parent };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -830,7 +831,7 @@ ASTNodeIndex checkKnownDefun(
 
 const ssize_t max_ssize = size_t(-1) >> 1;
 
-// return the promoted type of the args to an arithmetic expression; rules of promotion: i32 < unknown < f32
+// return the promoted type of the args to an arithmetic expression; rules of promotion follow the enum order
 ASTReturnType getArgsReturnType(
 	const ASTNodeIndex parent,
 	const ASTNodes& tree)
@@ -842,25 +843,12 @@ ASTReturnType getArgsReturnType(
 	if (node.args.empty())
 		return ASTRETURN_NONE;
 
-	ASTReturnType ret = ASTRETURN_NONE;
+	ASTReturnType ret = tree[node.args.front()].rtype;
 
 	// shortcut: stop iterating the args as soon as max promotion level is reached
-	for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end() && ASTRETURN_F32 != ret; ++it) {
-		switch (tree[*it].retType) {
-		case ASTRETURN_UNKNOWN:
-			if (ASTRETURN_F32 != ret)
-				ret = ASTRETURN_UNKNOWN;
-			break;
-		case ASTRETURN_I32:
-			if (ASTRETURN_NONE == ret)
-				ret = ASTRETURN_I32;
-			break;
-		case ASTRETURN_F32:
-			ret = ASTRETURN_F32;
-			break;
-		default:
-			assert(false);
-			break;
+	for (ASTNodeIndices::const_iterator it = node.args.begin() + 1; it != node.args.end() && ASTRETURN_UNKNOWN != ret; ++it) {
+		if (ret < tree[*it].rtype) {
+			ret = tree[*it].rtype;
 		}
 	}
 
@@ -879,9 +867,9 @@ ASTReturnType getIfReturnType(
 	if (3 != node.args.size())
 		return ASTRETURN_NONE;
 
-	ASTReturnType ret = tree[node.args[1]].retType;
+	ASTReturnType ret = tree[node.args[1]].rtype;
 
-	if (tree[node.args[2]].retType != ret)
+	if (tree[node.args[2]].rtype != ret)
 		ret = ASTRETURN_UNKNOWN;
 
 	return ret;
@@ -904,21 +892,21 @@ ssize_t getMinFunArgs(
 	case INTRIN_MINUS:
 	case INTRIN_MUL:
 	case INTRIN_DIV:
-		node.retType = getArgsReturnType(parent, tree);
+		node.rtype = getArgsReturnType(parent, tree);
 		return -2;
 	// all other functions have an exact number of args
 	case INTRIN_IFZERO:
 	case INTRIN_IFNEG:
-		node.retType = getIfReturnType(parent, tree);
+		node.rtype = getIfReturnType(parent, tree);
 		return 3;
 	case INTRIN_PRINT:
-		node.retType = tree[node.args.front()].retType;
+		node.rtype = tree[node.args.front()].rtype;
 		return 1;
 	case INTRIN_READ_I32:
-		node.retType = ASTRETURN_I32;
+		node.rtype = ASTRETURN_I32;
 		return 0;
 	case INTRIN_READ_F32:
-		node.retType = ASTRETURN_F32;
+		node.rtype = ASTRETURN_F32;
 		return 0;
 	}
 
@@ -929,7 +917,7 @@ ssize_t getMinFunArgs(
 		return max_ssize;
 
 	// patch the return type and eval target of the invocation
-	node.retType = tree[defunIdx].retType;
+	node.rtype = tree[defunIdx].rtype;
 	node.eval = defunIdx;
 	return getSubCount(true, defunIdx, tree);
 }
@@ -1005,7 +993,7 @@ size_t getNode(
 
 			// node introduces a named scope
 			newnode.name = tokens[start_it].val;
-			newnode.retType = ASTRETURN_UNKNOWN;
+			newnode.rtype = ASTRETURN_UNKNOWN;
 			newnode.type = ASTNODE_LET;
 
 			tree.push_back(newnode);
@@ -1033,7 +1021,7 @@ size_t getNode(
 			// node introduces an anonymous scope
 			newnode.name.ptr = nullptr;
 			newnode.name.len = 0;
-			newnode.retType = ASTRETURN_NONE;
+			newnode.rtype = ASTRETURN_NONE;
 			newnode.type = ASTNODE_LET;
 
 			tree.push_back(newnode);
@@ -1065,7 +1053,7 @@ size_t getNode(
 		case TOKEN_READ_F32:
 		case TOKEN_IDENTIFIER:
 			newnode.name = tokens[start_it].val;
-			newnode.retType = ASTRETURN_NONE;
+			newnode.rtype = ASTRETURN_NONE;
 			newnode.type = ASTNODE_EVAL_FUN;
 			newnode.eval = getEvalTarget(tokens[start_it].token);
 
@@ -1111,7 +1099,7 @@ size_t getNode(
 			}
 			// return type copied from last sub-expression
 			for (it = tree[newnodeIdx].args.rbegin(); it != tree[newnodeIdx].args.rend() && tree[*it].isDefun(); ++it) {}
-			tree[newnodeIdx].retType = tree[*it].retType;
+			tree[newnodeIdx].rtype = tree[*it].rtype;
 			break;
 		case ASTNODE_EVAL_FUN:
 			subcount = getSubCount(false, newnodeIdx, tree);
@@ -1145,13 +1133,13 @@ size_t getNode(
 		ASTNodeIndex initIdx;
 	case TOKEN_LITERAL_I32:
 		newnode.literal_i32 = tokens[start].literal_i32;
-		newnode.retType = ASTRETURN_I32;
+		newnode.rtype = ASTRETURN_I32;
 		newnode.type = ASTNODE_LITERAL;
 		break;
 
 	case TOKEN_LITERAL_F32:
 		newnode.literal_f32 = tokens[start].literal_f32;
-		newnode.retType = ASTRETURN_F32;
+		newnode.rtype = ASTRETURN_F32;
 		newnode.type = ASTNODE_LITERAL;
 		break;
 
@@ -1167,7 +1155,7 @@ size_t getNode(
 		}
 
 		newnode.name = tokens[start].val;
-		newnode.retType = tree[initIdx].retType;
+		newnode.rtype = tree[initIdx].rtype;
 		newnode.type = ASTNODE_EVAL_VAR;
 		newnode.eval = initIdx;
 		break;
@@ -1224,7 +1212,7 @@ int main(int argc, char** argv)
 
 #endif
 	ASTNodes tree;
-	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .retType = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
+	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
 	tree.push_back(root);
 
 	// collect top-level expressions/statements, registering them as root sub-nodes
