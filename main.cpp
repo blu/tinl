@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include <stdio.h>
@@ -1173,6 +1174,225 @@ size_t getNode(
 	return 1;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// evaluation of (guaranteed correct) AST
+
+struct Value {
+	ASTReturnType type;
+	union {
+		int32_t i32;
+		float f32;
+	};
+
+	void print(FILE* f) const;
+};
+
+void Value::print(FILE* f) const
+{
+	fprintf(f, "%s", stringFromReturnType(type));
+
+	switch (type) {
+	case ASTRETURN_I32:
+		fprintf(f, " %d\n", i32);
+		break;
+	case ASTRETURN_F32:
+		fprintf(f, " %f\n", f32);
+		break;
+	default:
+		assert(false);
+		break;
+	}
+}
+
+struct NamedValue {
+	ASTNodeIndex name;
+	Value        val;
+};
+
+typedef std::vector< NamedValue > VarStack;
+
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs = 0);
+
+template < int32_t BINOP_I32(int32_t, int32_t), float BINOP_F32(float, float) >
+Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
+{
+	assert(nullidx != index && index < tree.size());
+	const ASTNode& node = tree[index];
+
+	int32_t acc_i32 = 0;
+	float acc_f32 = 0;
+	bool isF32 = false;
+
+	// arithmetic intrinsics have at least two args
+	ASTNodeIndices::const_iterator it = node.args.begin();
+	const Value arg = eval(*it++, tree, stack);
+
+	// promote computation to f32 at the first encounter of an f32 arg
+	if (ASTRETURN_F32 == arg.type) {
+		acc_f32 = arg.f32;
+		isF32 = true;
+	}
+	else {
+		assert(ASTRETURN_I32 == arg.type);
+		acc_i32 = arg.i32;
+	}
+
+	if (!isF32) {
+		for (; it != node.args.end(); ++it) {
+			const Value arg = eval(*it, tree, stack);
+
+			if (ASTRETURN_F32 == arg.type) {
+				++it; // we are done with this arg
+				acc_f32 = BINOP_F32(float(acc_i32), arg.f32);
+				isF32 = true;
+				break;
+			}
+
+			assert(ASTRETURN_I32 == arg.type);
+			acc_i32 = BINOP_I32(acc_i32, arg.i32);
+		}
+	}
+
+	if (isF32) {
+		for (; it != node.args.end(); ++it) {
+			const Value arg = eval(*it, tree, stack);
+
+			if (ASTRETURN_I32 == arg.type) {
+				acc_f32 = BINOP_F32(acc_f32, float(arg.i32));
+			}
+			else {
+				assert(ASTRETURN_F32 == arg.type);
+				acc_f32 = BINOP_F32(acc_f32, arg.f32);
+			}
+		}
+	}
+
+	return isF32
+		? Value{ .type = ASTRETURN_F32, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
+		: Value{ .type = ASTRETURN_I32, { .i32 = acc_i32 } };
+}
+
+template < typename T >
+T binop_plus(T a, T b) { return a + b; }
+
+template < typename T >
+T binop_minus(T a, T b) { return a - b; }
+
+template < typename T >
+T binop_mul(T a, T b) { return a * b; }
+
+template < typename T >
+T binop_div(T a, T b) { return a / b; }
+
+template < typename T >
+T read(const char* prompt, const char* format)
+{
+	T ret;
+
+	fprintf(stdout, prompt);
+
+	if (1 != fscanf(stdin, format, &ret)) {
+		fprintf(stderr, "runtime error: invalid input\n");
+		exit(-1); // runtime input error
+	}
+
+	return ret;
+}
+
+Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
+{
+	assert(nullidx != index && index < tree.size());
+	const ASTNode& node = tree[index];
+	const uint32_t narg = 0 < nargs ? nargs : 0;
+	const size_t stackRestore = stack.size() - narg;
+	Value ret;
+
+	switch (node.type) {
+	case ASTNODE_LET:
+		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
+			if (tree[*it].isDefun())
+				continue;
+
+			ret = eval(*it, tree, stack, nargs--);
+		}
+		// pop args/locals from the var stack
+		stack.resize(stackRestore);
+		return ret;
+	case ASTNODE_INIT:
+		if (node.args.empty()) // is this a defun arg? it's already on the var stack -- just name it
+			stack[stack.size() - narg].name = index;
+		else // this is a local var -- init it and put it on the stack
+			stack.push_back(NamedValue{ .name = index, .val = eval(node.args.front(), tree, stack) });
+		return Value();
+	case ASTNODE_EVAL_VAR:
+		// scan the var stack from the top down for our var
+		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it)
+			if (it->name == node.eval)
+				return it->val;
+		break;
+	case ASTNODE_EVAL_FUN:
+		switch (node.eval) {
+		case INTRIN_PLUS:
+			return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
+		case INTRIN_MINUS:
+			return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
+		case INTRIN_MUL:
+			return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
+		case INTRIN_DIV:
+			return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
+		case INTRIN_IFZERO:
+			assert(3 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
+
+			if (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
+				return eval(node.args[1], tree, stack);
+
+			return eval(node.args[2], tree, stack);
+		case INTRIN_IFNEG:
+			assert(3 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
+
+			if (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
+				return eval(node.args[1], tree, stack);
+
+			return eval(node.args[2], tree, stack);
+		case INTRIN_PRINT:
+			assert(1 == node.args.size());
+			ret = eval(node.args[0], tree, stack);
+
+			if (ASTRETURN_F32 == ret.type)
+				fprintf(stdout, "%f\n", ret.f32);
+			else
+				fprintf(stdout, "%d\n", ret.i32);
+
+			return ret;
+		case INTRIN_READ_I32:
+			return Value{ .type = ASTRETURN_I32, .i32 = read<int32_t>("i: ", "%d") };
+		case INTRIN_READ_F32:
+			return Value{ .type = ASTRETURN_F32, .f32 = read<float>("f: ", "%f") };
+		default:
+			// it's a defun -- collect all args, pushing them onto the var stack
+			for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
+				const Value arg = eval(*it, tree, stack);
+				stack.push_back(NamedValue{ .name = nullidx, .val = arg });
+			}
+			// invoke the callee, which will pop the var stack once done
+			return eval(node.eval, tree, stack, node.args.size());
+		}
+	case ASTNODE_LITERAL:
+		switch (node.rtype) {
+		case ASTRETURN_I32:
+			return Value{ .type = ASTRETURN_I32, .i32 = node.literal_i32 };
+		case ASTRETURN_F32:
+			return Value{ .type = ASTRETURN_F32, .f32 = node.literal_f32 };
+		}
+		break;
+	}
+
+	assert(false);
+	return Value{ .type = ASTRETURN_NONE };
+}
+
 int main(int argc, char** argv)
 {
 	FILE* infile = stdin;
@@ -1241,5 +1461,12 @@ int main(int argc, char** argv)
 		tree[*it].print(stdout, tree, 0);
 
 	fprintf(stdout, "success\n");
+
+	// evaluate AST and print result
+	VarStack stack;
+	const Value res = eval(0, tree, stack);
+	res.print(stdout);
+
+	assert(stack.empty());
 	return 0;
 }
