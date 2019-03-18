@@ -1178,7 +1178,9 @@ size_t getNode(
 // evaluation of (guaranteed correct) AST
 
 struct Value {
-	ASTReturnType type;
+	ASTReturnType type : 14;
+	bool literal : 1;
+	bool sidefx : 1;
 	union {
 		int32_t i32;
 		float f32;
@@ -1190,6 +1192,12 @@ struct Value {
 void Value::print(FILE* f) const
 {
 	fprintf(f, "%s", stringFromReturnType(type));
+
+	if (literal)
+		fprintf(f, " \033[38;5;14m" "lit" "\033[0m");
+
+	if (sidefx)
+		fprintf(f, " \033[38;5;11m" "sid" "\033[0m");
 
 	switch (type) {
 	case ASTRETURN_I32:
@@ -1227,6 +1235,10 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	ASTNodeIndices::const_iterator it = node.args.begin();
 	const Value arg = eval(*it++, tree, stack);
 
+	// establish 'literal' and 'sidefx' statuses -- former as an intersection, latter as a union of the respective arg statuses
+	bool literal = arg.literal;
+	bool sidefx = arg.sidefx;
+
 	// promote computation to f32 at the first encounter of an f32 arg
 	if (ASTRETURN_F32 == arg.type) {
 		acc_f32 = arg.f32;
@@ -1240,6 +1252,8 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	if (!isF32) {
 		for (; it != node.args.end(); ++it) {
 			const Value arg = eval(*it, tree, stack);
+			literal &= arg.literal;
+			sidefx |= arg.sidefx;
 
 			if (ASTRETURN_F32 == arg.type) {
 				++it; // we are done with this arg
@@ -1256,6 +1270,8 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	if (isF32) {
 		for (; it != node.args.end(); ++it) {
 			const Value arg = eval(*it, tree, stack);
+			literal &= arg.literal;
+			sidefx |= arg.sidefx;
 
 			if (ASTRETURN_I32 == arg.type) {
 				acc_f32 = BINOP_F32(acc_f32, float(arg.i32));
@@ -1268,8 +1284,8 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	}
 
 	return isF32
-		? Value{ .type = ASTRETURN_F32, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
-		: Value{ .type = ASTRETURN_I32, { .i32 = acc_i32 } };
+		? Value{ .type = ASTRETURN_F32, .literal = literal, .sidefx = sidefx, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
+		: Value{ .type = ASTRETURN_I32, .literal = literal, .sidefx = sidefx, { .i32 = acc_i32 } };
 }
 
 template < typename T >
@@ -1305,6 +1321,7 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 	const ASTNode& node = tree[index];
 	const uint32_t narg = 0 < nargs ? nargs : 0;
 	const size_t stackRestore = stack.size() - narg;
+	bool literal;
 	Value ret;
 
 	switch (node.type) {
@@ -1343,19 +1360,27 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 		case INTRIN_IFZERO:
 			assert(3 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
+			literal = ret.literal;
 
 			if (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
-				return eval(node.args[1], tree, stack);
+				ret = eval(node.args[1], tree, stack);
+			else
+				ret = eval(node.args[2], tree, stack);
 
-			return eval(node.args[2], tree, stack);
+			ret.literal &= literal;
+			return ret;
 		case INTRIN_IFNEG:
 			assert(3 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
+			literal = ret.literal;
 
 			if (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
-				return eval(node.args[1], tree, stack);
+				ret = eval(node.args[1], tree, stack);
+			else
+				ret = eval(node.args[2], tree, stack);
 
-			return eval(node.args[2], tree, stack);
+			ret.literal &= literal;
+			return ret;
 		case INTRIN_PRINT:
 			assert(1 == node.args.size());
 			ret = eval(node.args[0], tree, stack);
@@ -1365,6 +1390,7 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 			else
 				fprintf(stdout, "%d\n", ret.i32);
 
+			ret.sidefx = true;
 			return ret;
 		case INTRIN_READ_I32:
 			return Value{ .type = ASTRETURN_I32, .i32 = read<int32_t>("i: ", "%d") };
@@ -1382,15 +1408,15 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 	case ASTNODE_LITERAL:
 		switch (node.rtype) {
 		case ASTRETURN_I32:
-			return Value{ .type = ASTRETURN_I32, .i32 = node.literal_i32 };
+			return Value{ .type = ASTRETURN_I32, .literal = true, .i32 = node.literal_i32 };
 		case ASTRETURN_F32:
-			return Value{ .type = ASTRETURN_F32, .f32 = node.literal_f32 };
+			return Value{ .type = ASTRETURN_F32, .literal = true, .f32 = node.literal_f32 };
 		}
 		break;
 	}
 
 	assert(false);
-	return Value{ .type = ASTRETURN_NONE };
+	return Value();
 }
 
 int main(int argc, char** argv)
