@@ -742,7 +742,7 @@ size_t getNodeDefun(
 // return the index of the 'init' statement of a named var; -1 if not found
 ASTNodeIndex checkKnownVar(
 	const StrRef& name,
-	const ASTNodeIndex parent,
+	ASTNodeIndex parent,
 	const ASTNodes& tree)
 {
 	assert(name.ptr);
@@ -752,6 +752,16 @@ ASTNodeIndex checkKnownVar(
 		return nullidx;
 
 	assert(parent < tree.size());
+
+	// if parent node is an init-statement then backtrack out of its parent let-expression, avoiding
+	// matches to siblings originating from the same let-expression, as well as self matches
+	if (ASTNODE_INIT == tree[parent].type) {
+		parent = tree[parent].parent;
+		assert(nullidx != parent && parent < tree.size());
+		assert(ASTNODE_LET == tree[parent].type);
+		parent = tree[parent].parent;
+		assert(nullidx != parent && parent < tree.size());
+	}
 
 	if (ASTNODE_LET == tree[parent].type) {
 		for (ASTNodeIndices::const_iterator it = tree[parent].args.begin(); it != tree[parent].args.end(); ++it) {
