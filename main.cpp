@@ -480,6 +480,7 @@ struct ASTNode {
 
 	void print(FILE* f, const std::vector<ASTNode>& tree, const size_t depth) const;
 	bool isDefun() const { return ASTNODE_LET == type && name.ptr; }
+	bool isInitialize() const { return ASTNODE_INIT == type; }
 };
 
 // special eval targets for built-in functions, AKA intrinsics
@@ -537,7 +538,13 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 			fprintf(f, "%s: %s\n", stringType, stringFromReturnType(rtype));
 		break;
 	case ASTNODE_INIT:
+		assert(name.ptr && name.len);
+		fprintf(f, "%s: %s %.*s \033[38;5;13m(%lu)\033[0m\n", stringType, stringFromReturnType(rtype), name.len, name.ptr, eval ? eval : this - &tree.front());
+		break;
 	case ASTNODE_EVAL_VAR:
+		assert(name.ptr && name.len);
+		fprintf(f, "%s: %s %.*s \033[38;5;13m(%lu)\033[0m\n", stringType, stringFromReturnType(rtype), name.len, name.ptr, eval);
+		break;
 	case ASTNODE_EVAL_FUN:
 		assert(name.ptr && name.len);
 		fprintf(f, "%s: %s %.*s\n", stringType, stringFromReturnType(rtype), name.len, name.ptr);
@@ -792,7 +799,7 @@ ASTNodeIndex checkKnownVar(
 		assert(nullidx != parent && parent < tree.size());
 		assert(ASTNODE_LET == tree[parent].type);
 		parent = tree[parent].parent;
-		assert(nullidx != parent);
+		assert(nullidx != parent && parent < tree.size());
 	}
 
 	if (ASTNODE_LET == tree[parent].type) {
@@ -1229,21 +1236,20 @@ struct NamedValue {
 
 typedef std::vector< NamedValue > VarStack;
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs = 0);
+Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size_t uncommittedStack);
 
 template < int32_t BINOP_I32(int32_t, int32_t), float BINOP_F32(float, float) >
-Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
+Value evalArith(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size_t uncommittedStack)
 {
 	assert(nullidx != index && index < tree.size());
-	const ASTNode& node = tree[index];
 
 	int32_t acc_i32 = 0;
 	float acc_f32 = 0;
 	bool isF32 = false;
 
 	// arithmetic intrinsics have at least two args
-	ASTNodeIndices::const_iterator it = node.args.begin();
-	const Value arg = eval(*it++, tree, stack);
+	ASTNodeIndices::const_iterator it = tree[index].args.begin();
+	const Value arg = eval(*it++, tree, stack, uncommittedStack);
 
 	// establish 'literal' and 'sidefx' statuses -- former as an intersection, latter as a union of the respective arg statuses
 	bool literal = arg.literal;
@@ -1260,8 +1266,8 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	}
 
 	if (!isF32) {
-		for (; it != node.args.end(); ++it) {
-			const Value arg = eval(*it, tree, stack);
+		for (; it != tree[index].args.end(); ++it) {
+			const Value arg = eval(*it, tree, stack, uncommittedStack);
 			literal &= arg.literal;
 			sidefx |= arg.sidefx;
 
@@ -1278,8 +1284,8 @@ Value evalArith(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack)
 	}
 
 	if (isF32) {
-		for (; it != node.args.end(); ++it) {
-			const Value arg = eval(*it, tree, stack);
+		for (; it != tree[index].args.end(); ++it) {
+			const Value arg = eval(*it, tree, stack, uncommittedStack);
 			literal &= arg.literal;
 			sidefx |= arg.sidefx;
 
@@ -1325,75 +1331,127 @@ T read(const char* prompt, const char* format)
 	return ret;
 }
 
-Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int32_t nargs)
+void copySubtree(const ASTNodeIndex srcIdx, const ASTNodeIndex dstIdx, ASTNodes& tree)
+{
+	assert(nullidx != srcIdx && srcIdx < tree.size());
+	assert(nullidx != dstIdx && dstIdx < tree.size());
+	assert(tree[dstIdx].args.empty());
+
+	for (ASTNodeIndices::const_iterator it = tree[srcIdx].args.begin(); it != tree[srcIdx].args.end(); ++it) {
+		ASTNode newnode = tree[*it];
+		newnode.parent = dstIdx;
+		newnode.args.clear();
+
+		// if copying an init-statement, memorize the index of the original
+		if (ASTNODE_INIT == newnode.type)
+			newnode.eval = *it;
+
+		const ASTNodeIndex newnodeIdx = tree.size();
+		tree.push_back(newnode);
+
+		tree[dstIdx].args.push_back(newnodeIdx);
+		copySubtree(*it, newnodeIdx, tree);
+	}
+}
+
+void replaceChild(const ASTNodeIndex oldIdx, const ASTNodeIndex newIdx, const ASTNodeIndex parent, ASTNodes& tree)
+{
+	assert(nullidx != parent && parent < tree.size());
+	const ASTNodeIndices::iterator end = tree[parent].args.end();
+	ASTNodeIndices::iterator it = tree[parent].args.begin();
+	for (; it != end && oldIdx != *it; ++it) {}
+	assert(end != it);
+	*it = newIdx;
+}
+
+Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size_t uncommittedStack)
 {
 	assert(nullidx != index && index < tree.size());
-	const ASTNode& node = tree[index];
-	const uint32_t narg = 0 < nargs ? nargs : 0;
-	const size_t stackRestore = stack.size() - narg;
-	bool literal;
-	Value ret;
+	const size_t stackRestore = stack.size();
+	Value ret{ .type = ASTRETURN_NONE };
 
-	switch (node.type) {
+	switch (tree[index].type) {
 	case ASTNODE_LET:
-		for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
-			if (tree[*it].isDefun())
-				continue;
+		{
+			bool sidefx = false;
+			for (ASTNodeIndices::const_iterator it = tree[index].args.begin(); it != tree[index].args.end(); ++it) {
+				// initializatons, when present, are mandatorily first
+				const bool uncommitted = tree[*it].isInitialize();
 
-			ret = eval(*it, tree, stack, nargs--);
+				if (tree[*it].isDefun())
+					continue;
+
+				ret = eval(*it, tree, stack, uncommitted ? uncommittedStack + (stack.size() - stackRestore) : uncommittedStack);
+				sidefx |= ret.sidefx;
+			}
+			ret.sidefx = sidefx;
+			// pop args/locals from the var stack
+			stack.resize(stackRestore);
+			break;
 		}
-		// pop args/locals from the var stack
-		stack.resize(stackRestore);
-		return ret;
 	case ASTNODE_INIT:
-		if (node.args.empty()) // is this a defun arg? it's already on the var stack -- just name it
-			stack[stack.size() - narg].name = index;
-		else // this is a local var -- init it and put it on the stack
-			stack.push_back(NamedValue{ .name = index, .val = eval(node.args.front(), tree, stack) });
-		return Value();
-	case ASTNODE_EVAL_VAR:
-		// scan the var stack from the top down for our var
-		for (VarStack::const_reverse_iterator it = stack.rbegin(); it != stack.rend(); ++it)
-			if (it->name == node.eval)
-				return it->val;
+		assert(!tree[index].args.empty());
+		// init the local var and put it on the stack, possibly under a copied name
+		ret = eval(tree[index].args.front(), tree, stack, uncommittedStack);
+		stack.push_back(NamedValue{ .name = tree[index].eval ? tree[index].eval : index, .val = ret });
 		break;
+	case ASTNODE_EVAL_VAR:
+		{
+			assert(stack.size() > uncommittedStack);
+			// scan the var stack from the top down for our var
+			VarStack::const_reverse_iterator it = stack.rbegin() + uncommittedStack;
+			for (; it != stack.rend() && it->name != tree[index].eval; ++it) {}
+			assert(it != stack.rend());
+			ret = it->val;
+			break;
+		}
 	case ASTNODE_EVAL_FUN:
-		switch (node.eval) {
+		switch (tree[index].eval) {
 		case INTRIN_PLUS:
-			return evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack);
+			ret = evalArith< binop_plus< int32_t >, binop_plus< float > >(index, tree, stack, uncommittedStack);
+			break;
 		case INTRIN_MINUS:
-			return evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack);
+			ret = evalArith< binop_minus< int32_t >, binop_minus< float > >(index, tree, stack, uncommittedStack);
+			break;
 		case INTRIN_MUL:
-			return evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack);
+			ret = evalArith< binop_mul< int32_t >, binop_mul< float > >(index, tree, stack, uncommittedStack);
+			break;
 		case INTRIN_DIV:
-			return evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
+			ret = evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack, uncommittedStack);
+			break;
 		case INTRIN_IFZERO:
-			assert(3 == node.args.size());
-			ret = eval(node.args[0], tree, stack);
-			literal = ret.literal;
+			{
+				assert(3 == tree[index].args.size());
+				ret = eval(tree[index].args[0], tree, stack, uncommittedStack);
+				const bool literal = ret.literal;
+				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32) ? 1 : 2;
 
-			if (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32)
-				ret = eval(node.args[1], tree, stack);
-			else
-				ret = eval(node.args[2], tree, stack);
+				// next eval may inline, replacing the original node branched to with a new node
+				ret = eval(tree[index].args[branch], tree, stack, uncommittedStack);
+				ret.literal &= literal;
 
-			ret.literal &= literal;
-			return ret;
+				if (literal)
+					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
+				break;
+			}
 		case INTRIN_IFNEG:
-			assert(3 == node.args.size());
-			ret = eval(node.args[0], tree, stack);
-			literal = ret.literal;
+			{
+				assert(3 == tree[index].args.size());
+				ret = eval(tree[index].args[0], tree, stack, uncommittedStack);
+				const bool literal = ret.literal;
+				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32) ? 1 : 2;
 
-			if (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32)
-				ret = eval(node.args[1], tree, stack);
-			else
-				ret = eval(node.args[2], tree, stack);
+				// next eval may inline, replacing the original node branched to with a new node
+				ret = eval(tree[index].args[branch], tree, stack, uncommittedStack);
+				ret.literal &= literal;
 
-			ret.literal &= literal;
-			return ret;
+				if (literal)
+					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
+				break;
+			}
 		case INTRIN_PRINT:
-			assert(1 == node.args.size());
-			ret = eval(node.args[0], tree, stack);
+			assert(1 == tree[index].args.size());
+			ret = eval(tree[index].args[0], tree, stack, uncommittedStack);
 
 			if (ASTRETURN_F32 == ret.type)
 				fprintf(stdout, "%f\n", ret.f32);
@@ -1401,32 +1459,64 @@ Value eval(const ASTNodeIndex index, const ASTNodes& tree, VarStack& stack, int3
 				fprintf(stdout, "%d\n", ret.i32);
 
 			ret.sidefx = true;
-			return ret;
+			break;
 		case INTRIN_READ_I32:
+			// nothing to update in a read node -- just return
 			return Value{ .type = ASTRETURN_I32, .i32 = read<int32_t>("i: ", "%d") };
 		case INTRIN_READ_F32:
+			// nothing to update in a read node -- just return
 			return Value{ .type = ASTRETURN_F32, .f32 = read<float>("f: ", "%f") };
 		default:
-			// it's a defun -- collect all args, pushing them onto the var stack
-			for (ASTNodeIndices::const_iterator it = node.args.begin(); it != node.args.end(); ++it) {
-				const Value arg = eval(*it, tree, stack);
-				stack.push_back(NamedValue{ .name = nullidx, .val = arg });
+			{
+				// inline the target defun as a let-expression
+				ASTNode newnode = { .name = { .ptr = nullptr, .len = 0 }, .rtype = tree[index].rtype, .type = ASTNODE_LET, .parent = tree[index].parent };
+
+				const ASTNodeIndex newnodeIdx = tree.size();
+				tree.push_back(newnode);
+				copySubtree(tree[index].eval, newnodeIdx, tree);
+
+				// patch parent with the newly created let-expression child
+				replaceChild(index, newnodeIdx, tree[index].parent, tree);
+
+				// patch init-statements with the respective args from the invocation
+				ASTNodeIndices::const_iterator at = tree[newnodeIdx].args.begin();
+				for (ASTNodeIndices::const_iterator it = tree[index].args.begin(); it != tree[index].args.end(); ++it, ++at) {
+					assert(ASTNODE_INIT == tree[*at].type && tree[*at].args.empty());
+					tree[*at].args.push_back(*it);
+				}
+				// execute the callee this time as a let-expression
+				ret = eval(newnodeIdx, tree, stack, uncommittedStack);
+				break;
 			}
-			// invoke the callee, which will pop the var stack once done
-			return eval(node.eval, tree, stack, node.args.size());
 		}
+		break;
 	case ASTNODE_LITERAL:
-		switch (node.rtype) {
+		switch (tree[index].rtype) {
 		case ASTRETURN_I32:
-			return Value{ .type = ASTRETURN_I32, .literal = true, .i32 = node.literal_i32 };
+			// nothing to update in a literal node -- just return
+			return Value{ .type = ASTRETURN_I32, .literal = true, .i32 = tree[index].literal_i32 };
 		case ASTRETURN_F32:
-			return Value{ .type = ASTRETURN_F32, .literal = true, .f32 = node.literal_f32 };
+			// nothing to update in a literal node -- just return
+			return Value{ .type = ASTRETURN_F32, .literal = true, .f32 = tree[index].literal_f32 };
 		}
 		break;
 	}
 
-	assert(false);
-	return Value();
+	assert(ASTRETURN_NONE != ret.type && ASTRETURN_UNKNOWN != ret.type);
+	tree[index].rtype = ret.type;
+
+	// check if node can be collapsed into a literal; not for root or init-statements
+	if (index && !tree[index].isInitialize() && ret.literal && !ret.sidefx) {
+		switch (ret.type) {
+		case ASTRETURN_I32:
+			tree[index] = ASTNode{ .literal_i32 = ret.i32, .rtype = ret.type, .type = ASTNODE_LITERAL, .parent = tree[index].parent };
+			break;
+		case ASTRETURN_F32:
+			tree[index] = ASTNode{ .literal_f32 = ret.f32, .rtype = ret.type, .type = ASTNODE_LITERAL, .parent = tree[index].parent };
+			break;
+		}
+	}
+	return ret;
 }
 
 int main(int argc, char** argv)
@@ -1500,8 +1590,12 @@ int main(int argc, char** argv)
 
 	// evaluate AST and print result
 	VarStack stack;
-	const Value res = eval(0, tree, stack);
+	const Value res = eval(0, tree, stack, 0);
 	res.print(stdout);
+
+	// print AST past evaluation
+	for (ASTNodeIndices::const_iterator it = tree.front().args.begin(); it != tree.front().args.end(); ++it)
+		tree[*it].print(stdout, tree, 0);
 
 	assert(stack.empty());
 	return 0;
