@@ -1,10 +1,4 @@
-(defun evenz(x)
-	(- x (* (/ x 2) 2)))
+(defun fib(x y n)
+	(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
 
-(defun foo(n)
-	(ifzero n 0
-		(let ()
-			(ifzero (evenz n) (print 2) (print 1))
-			(foo (- n 1)))))
-
-(foo (readi32))
+(fib 1 1 44)
