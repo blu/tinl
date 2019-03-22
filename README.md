@@ -46,3 +46,140 @@ TINL:
 	(defun fib(x y n)
 		(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
 ```
+
+Example of partial-evaluation (PE) optimisations in TINL
+--------------------------------------------------------
+
+Print first 5 members of the Fibonacci sequence, return the 5th as result:
+
+```sh
+$ echo "(defun fib(x y n) (print x) (ifzero n (print y) (fib y (+ x y) (- n 1)))) (fib 1 1 3)" | ./tinl # ./tinl fib_short_sid.tinl
+ASTNODE_LET: unknown fib
+  ASTNODE_INIT: unknown x (2)
+  ASTNODE_INIT: unknown y (3)
+  ASTNODE_INIT: unknown n (4)
+  ASTNODE_EVAL_FUN: unknown print
+    ASTNODE_EVAL_VAR: unknown x (2)
+  ASTNODE_EVAL_FUN: unknown ifzero
+    ASTNODE_EVAL_VAR: unknown n (4)
+    ASTNODE_EVAL_FUN: unknown print
+      ASTNODE_EVAL_VAR: unknown y (3)
+    ASTNODE_EVAL_FUN: unknown fib
+      ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown +
+        ASTNODE_EVAL_VAR: unknown x (2)
+        ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown -
+        ASTNODE_EVAL_VAR: unknown n (4)
+        ASTNODE_LITERAL: i32 1
+ASTNODE_EVAL_FUN: unknown fib
+  ASTNODE_LITERAL: i32 1
+  ASTNODE_LITERAL: i32 1
+  ASTNODE_LITERAL: i32 3
+success
+1
+1
+2
+3
+5
+i32 lit sid 5
+ASTNODE_LET: unknown fib
+  ASTNODE_INIT: unknown x (2)
+  ASTNODE_INIT: unknown y (3)
+  ASTNODE_INIT: unknown n (4)
+  ASTNODE_EVAL_FUN: unknown print
+    ASTNODE_EVAL_VAR: unknown x (2)
+  ASTNODE_EVAL_FUN: unknown ifzero
+    ASTNODE_EVAL_VAR: unknown n (4)
+    ASTNODE_EVAL_FUN: unknown print
+      ASTNODE_EVAL_VAR: unknown y (3)
+    ASTNODE_EVAL_FUN: unknown fib
+      ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown +
+        ASTNODE_EVAL_VAR: unknown x (2)
+        ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown -
+        ASTNODE_EVAL_VAR: unknown n (4)
+        ASTNODE_LITERAL: i32 1
+ASTNODE_LET: i32
+  ASTNODE_INIT: i32 x (2)
+    ASTNODE_LITERAL: i32 1
+  ASTNODE_INIT: i32 y (3)
+    ASTNODE_LITERAL: i32 1
+  ASTNODE_INIT: i32 n (4)
+    ASTNODE_LITERAL: i32 3
+  ASTNODE_EVAL_FUN: i32 print
+    ASTNODE_LITERAL: i32 1
+  ASTNODE_LET: i32
+    ASTNODE_INIT: i32 x (2)
+      ASTNODE_LITERAL: i32 1
+    ASTNODE_INIT: i32 y (3)
+      ASTNODE_LITERAL: i32 2
+    ASTNODE_INIT: i32 n (4)
+      ASTNODE_LITERAL: i32 2
+    ASTNODE_EVAL_FUN: i32 print
+      ASTNODE_LITERAL: i32 1
+    ASTNODE_LET: i32
+      ASTNODE_INIT: i32 x (2)
+        ASTNODE_LITERAL: i32 2
+      ASTNODE_INIT: i32 y (3)
+        ASTNODE_LITERAL: i32 3
+      ASTNODE_INIT: i32 n (4)
+        ASTNODE_LITERAL: i32 1
+      ASTNODE_EVAL_FUN: i32 print
+        ASTNODE_LITERAL: i32 2
+      ASTNODE_LET: i32
+        ASTNODE_INIT: i32 x (2)
+          ASTNODE_LITERAL: i32 3
+        ASTNODE_INIT: i32 y (3)
+          ASTNODE_LITERAL: i32 5
+        ASTNODE_INIT: i32 n (4)
+          ASTNODE_LITERAL: i32 0
+        ASTNODE_EVAL_FUN: i32 print
+          ASTNODE_LITERAL: i32 3
+        ASTNODE_EVAL_FUN: i32 print
+          ASTNODE_LITERAL: i32 5
+```
+
+Return the 5th member of the Fibonacci sequence:
+
+```sh
+$ echo "(defun fib(x y n) (ifzero n y (fib y (+ x y) (- n 1)))) (fib 1 1 3)" | ./tinl # ./tinl fib_short_lit.tinl
+ASTNODE_LET: unknown fib
+  ASTNODE_INIT: unknown x (2)
+  ASTNODE_INIT: unknown y (3)
+  ASTNODE_INIT: unknown n (4)
+  ASTNODE_EVAL_FUN: unknown ifzero
+    ASTNODE_EVAL_VAR: unknown n (4)
+    ASTNODE_EVAL_VAR: unknown y (3)
+    ASTNODE_EVAL_FUN: unknown fib
+      ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown +
+        ASTNODE_EVAL_VAR: unknown x (2)
+        ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown -
+        ASTNODE_EVAL_VAR: unknown n (4)
+        ASTNODE_LITERAL: i32 1
+ASTNODE_EVAL_FUN: unknown fib
+  ASTNODE_LITERAL: i32 1
+  ASTNODE_LITERAL: i32 1
+  ASTNODE_LITERAL: i32 3
+success
+i32 lit 5
+ASTNODE_LET: unknown fib
+  ASTNODE_INIT: unknown x (2)
+  ASTNODE_INIT: unknown y (3)
+  ASTNODE_INIT: unknown n (4)
+  ASTNODE_EVAL_FUN: unknown ifzero
+    ASTNODE_EVAL_VAR: unknown n (4)
+    ASTNODE_EVAL_VAR: unknown y (3)
+    ASTNODE_EVAL_FUN: unknown fib
+      ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown +
+        ASTNODE_EVAL_VAR: unknown x (2)
+        ASTNODE_EVAL_VAR: unknown y (3)
+      ASTNODE_EVAL_FUN: unknown -
+        ASTNODE_EVAL_VAR: unknown n (4)
+        ASTNODE_LITERAL: i32 1
+ASTNODE_LITERAL: i32 5
+```
