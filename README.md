@@ -71,6 +71,7 @@ Benchmarks
 | Intel Xeon E5-2687W (Sandy Bridge @ 3.1 GHz)      |  0.155s         |  1.350s         | clang++-3.9, amd64   |
 | Intel Xeon E3-1270v2 (Ivy Bridge @ 1.6 GHz)       |  0.288s         |  2.616s         | clang++-3.7, amd64   |
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.395s         |  3.460s         | g++-8.1, aarch64     |
+| Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.699s         |  5.670s         | g++-8.3, mips32r5    |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -84,6 +85,7 @@ Benchmarks
 | Intel Xeon E5-2687W (Sandy Bridge @ 3.1 GHz)      |  0.4805         |  4.1850         | clang++-3.9, amd64   |
 | Intel Xeon E3-1270v2 (Ivy Bridge @ 1.6 GHz)       |  0.4608         |  4.1856         | clang++-3.7, amd64   |
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.5135         |  4.4980         | g++-8.1, aarch64     |
+| Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.8388         |  6.8040         | g++-8.3, mips32r5    |
 
 Logs
 ----
@@ -275,4 +277,23 @@ user    0m3.448s
 sys     0m0.008s
 $ echo "scale=4; 3.460 * 1.3" | bc
 4.4980
+```
+
+Baikal-T1 (P5600 @ 1.2GHz, mips32r5)
+```
+$ g++-8.3 main.cpp -o test -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -std=c++11 -Wno-switch -Wno-format-security -Wno-div-by-zero -march=p5600 -mtune=p5600 -DNDEBUG && strip ./test
+$ time taskset 0x1 ./test bench_fac.tinl > /dev/null
+
+real    0m0.699s
+user    0m0.690s
+sys     0m0.000s
+$ echo "scale=4; 0.699 * 1.2" | bc
+.8388
+$ time taskset 0x1 ./test bench_fib.tinl > /dev/null
+
+real    0m5.670s
+user    0m5.660s
+sys     0m0.000s
+$ echo "scale=4; 5.670 * 1.2" | bc
+6.8040
 ```
