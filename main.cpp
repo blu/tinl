@@ -1195,9 +1195,10 @@ size_t getNode(
 // evaluation of (guaranteed correct) AST
 
 struct Value {
-	ASTReturnType type : 14;
+	ASTReturnType type : 13;
 	bool literal : 1;
 	bool sidefx : 1;
+	bool incoh : 1;
 	union {
 		int32_t i32;
 		float f32;
@@ -1215,6 +1216,9 @@ void Value::print(FILE* f) const
 
 	if (sidefx)
 		fprintf(f, " \033[38;5;11m" "sid" "\033[0m");
+
+	if (incoh)
+		fprintf(f, " \033[38;5;9m" "inc" "\033[0m");
 
 	switch (type) {
 	case ASTRETURN_I32:
@@ -1251,9 +1255,10 @@ Value evalArith(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const
 	ASTNodeIndices::const_iterator it = tree[index].args.begin();
 	const Value arg = eval(*it++, tree, stack, uncommittedStack);
 
-	// establish 'literal' and 'sidefx' statuses -- former as an intersection, latter as a union of the respective arg statuses
+	// establish 'literal', 'sidefx' and 'incoh' statuses -- first as an intersection, next two as a union of the respective arg statuses
 	bool literal = arg.literal;
 	bool sidefx = arg.sidefx;
+	bool incoh = arg.incoh;
 
 	// promote computation to f32 at the first encounter of an f32 arg
 	if (ASTRETURN_F32 == arg.type) {
@@ -1270,6 +1275,7 @@ Value evalArith(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const
 			const Value arg = eval(*it, tree, stack, uncommittedStack);
 			literal &= arg.literal;
 			sidefx |= arg.sidefx;
+			incoh |= arg.incoh;
 
 			if (ASTRETURN_F32 == arg.type) {
 				++it; // we are done with this arg
@@ -1288,6 +1294,7 @@ Value evalArith(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const
 			const Value arg = eval(*it, tree, stack, uncommittedStack);
 			literal &= arg.literal;
 			sidefx |= arg.sidefx;
+			incoh |= arg.incoh;
 
 			if (ASTRETURN_I32 == arg.type) {
 				acc_f32 = BINOP_F32(acc_f32, float(arg.i32));
@@ -1300,8 +1307,8 @@ Value evalArith(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const
 	}
 
 	return isF32
-		? Value{ .type = ASTRETURN_F32, .literal = literal, .sidefx = sidefx, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
-		: Value{ .type = ASTRETURN_I32, .literal = literal, .sidefx = sidefx, { .i32 = acc_i32 } };
+		? Value{ .type = ASTRETURN_F32, .literal = literal, .sidefx = sidefx, .incoh = incoh, { .f32 = acc_f32 } } // enclose anonymous union to workaround clang bug
+		: Value{ .type = ASTRETURN_I32, .literal = literal, .sidefx = sidefx, .incoh = incoh, { .i32 = acc_i32 } };
 }
 
 template < typename T >
@@ -1429,6 +1436,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size
 				// next eval may inline, replacing the original node branched to with a new node
 				ret = eval(tree[index].args[branch], tree, stack, uncommittedStack);
 				ret.literal &= literal;
+				ret.incoh = !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
 
 				if (literal)
 					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
@@ -1444,6 +1452,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size
 				// next eval may inline, replacing the original node branched to with a new node
 				ret = eval(tree[index].args[branch], tree, stack, uncommittedStack);
 				ret.literal &= literal;
+				ret.incoh = !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
 
 				if (literal)
 					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
@@ -1502,8 +1511,9 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack, const size
 		break;
 	}
 
-	assert(ASTRETURN_NONE != ret.type && ASTRETURN_UNKNOWN != ret.type);
-	tree[index].rtype = ret.type;
+	assert(ASTRETURN_NONE != ret.type);
+	if (!ret.incoh)
+		tree[index].rtype = ret.type;
 
 	// check if node can be collapsed into a literal; not for root or init-statements
 	if (index && !tree[index].isInitialize() && ret.literal && !ret.sidefx) {
