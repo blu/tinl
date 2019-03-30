@@ -73,6 +73,7 @@ Benchmarks
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.395s         |  3.460s         | g++-8.1, aarch64     |
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.699s         |  5.670s         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.451s         |  3.583s         | clang++-3.8, armv7l  |
+| Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.450s         |  3.866s         | g++-8.2, aarch64     |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -88,6 +89,7 @@ Benchmarks
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.5135         |  4.4980         | g++-8.1, aarch64     |
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.8388         |  6.8040         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.9020         |  7.1660         | clang++-3.8, armv7l  |
+| Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.6426         |  5.5206         | g++-8.2, aarch64     |
 
 Logs
 ----
@@ -317,4 +319,23 @@ user    0m3.535s
 sys     0m0.045s
 $ echo "scale=4; 3.583 * 2.0" | bc
 7.1660
+```
+
+Tegra X1 (Cortex-A57 @ 1.428GHz, aarch64)
+```
+$ g++-8.2 main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8-a -mcpu=cortex-a57 -DNDEBUG && strip ./test
+$ time ./test bench_fac.tinl > /dev/null
+
+real    0m0,450s
+user    0m0,448s
+sys     0m0,000s
+$ echo "scale=4; 0.450 * 1.428" | bc
+.6426
+$ time ./test bench_fib.tinl > /dev/null
+
+real    0m3,866s
+user    0m3,856s
+sys     0m0,000s
+$ echo "scale=4; 3.866 * 1.428" | bc
+5.5206
 ```
