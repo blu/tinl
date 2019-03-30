@@ -72,6 +72,7 @@ Benchmarks
 | Intel Xeon E3-1270v2 (Ivy Bridge @ 1.6 GHz)       |  0.288s         |  2.616s         | clang++-3.7, amd64   |
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.395s         |  3.460s         | g++-8.1, aarch64     |
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.699s         |  5.670s         | g++-8.3, mips32r5    |
+| Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.451s         |  3.583s         | clang++-3.8, armv7l  |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -86,6 +87,7 @@ Benchmarks
 | Intel Xeon E3-1270v2 (Ivy Bridge @ 1.6 GHz)       |  0.4608         |  4.1856         | clang++-3.7, amd64   |
 | Marvell ARMADA 8040 (Cortex-A72 @ 1.3 GHz)        |  0.5135         |  4.4980         | g++-8.1, aarch64     |
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.8388         |  6.8040         | g++-8.3, mips32r5    |
+| Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.9020         |  7.1660         | clang++-3.8, armv7l  |
 
 Logs
 ----
@@ -296,4 +298,23 @@ user    0m5.660s
 sys     0m0.000s
 $ echo "scale=4; 5.670 * 1.2" | bc
 6.8040
+```
+
+Exynos 5422 (Cortex-A15 @ 2.0GHz, armv7l)
+```
+$ clang++-3.8 main.cpp -o test -std=c++11 -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -DNDEBUG -march=armv7-a -mcpu=cortex-a15 -Wno-c++11-narrowing -Wno-switch -Wno-format-security && strip ./test
+$ time taskset 0xf0 ./test bench_fac.tinl > /dev/null
+
+real    0m0.451s
+user    0m0.405s
+sys     0m0.045s
+$ echo "scale=4; 0.451 * 2.0" | bc
+.9020
+$ time taskset 0xf0 ./test bench_fib.tinl > /dev/null
+
+real    0m3.583s
+user    0m3.535s
+sys     0m0.045s
+$ echo "scale=4; 3.583 * 2.0" | bc
+7.1660
 ```
