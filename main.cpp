@@ -538,9 +538,6 @@ void ASTNode::print(FILE* f, const std::vector<ASTNode>& tree, const size_t dept
 			fprintf(f, "%s: %s\n", stringType, stringFromReturnType(rtype));
 		break;
 	case ASTNODE_INIT:
-		assert(name.ptr && name.len);
-		fprintf(f, "%s: %s %.*s \033[38;5;13m(%lu)\033[0m\n", stringType, stringFromReturnType(rtype), name.len, name.ptr, nullidx != eval ? eval : this - &tree.front());
-		break;
 	case ASTNODE_EVAL_VAR:
 		assert(name.ptr && name.len);
 		fprintf(f, "%s: %s %.*s \033[38;5;13m(%lu)\033[0m\n", stringType, stringFromReturnType(rtype), name.len, name.ptr, eval);
@@ -689,11 +686,10 @@ size_t getNodeLet(
 		span_it -= subspan;
 		size_t subspan_it = subspan - 2; // account for both parentheses
 
-		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_NONE, .type = ASTNODE_INIT, .parent = parent, .eval = nullidx };
+		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_NONE, .type = ASTNODE_INIT, .parent = parent, .eval = tree.size() };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
-
 		tree[parent].args.push_back(newnodeIdx);
 
 		// account for identifier token itself
@@ -764,7 +760,7 @@ size_t getNodeDefun(
 			return size_t(-1);
 		}
 
-		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_UNKNOWN, .type = ASTNODE_INIT, .parent = parent, .eval = nullidx };
+		ASTNode newnode = { .name = tokens[start_it].val, .rtype = ASTRETURN_UNKNOWN, .type = ASTNODE_INIT, .parent = parent, .eval = tree.size() };
 
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
@@ -1349,10 +1345,6 @@ void copySubtree(const ASTNodeIndex srcIdx, const ASTNodeIndex dstIdx, ASTNodes&
 		newnode.parent = dstIdx;
 		newnode.args.clear();
 
-		// if copying an init-statement, memorize the index of the original
-		if (ASTNODE_INIT == newnode.type)
-			newnode.eval = *it;
-
 		const ASTNodeIndex newnodeIdx = tree.size();
 		tree.push_back(newnode);
 
@@ -1389,8 +1381,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			}
 			// de-anonymize any newly-initialized vars
 			ASTNodeIndices::const_iterator jt = tree[index].args.begin();
-			VarStack::iterator st = stack.begin() + stackRestore;
-			for (; st != stack.end(); ++st, ++jt) {
+			for (VarStack::iterator st = stack.begin() + stackRestore; st != stack.end(); ++st, ++jt) {
 				assert(ASTNODE_INIT == tree[*jt].type && nullidx != tree[*jt].eval);
 				st->name = tree[*jt].eval;
 			}
@@ -1409,11 +1400,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			break;
 		}
 	case ASTNODE_INIT:
-		// if var name was not inherited, name the var now
-		if (nullidx == tree[index].eval)
-			tree[index].eval = index;
-
-		// init the local var and put it on the stack anonymously
+		// init the local var and put it on the stack anonymized
 		assert(!tree[index].args.empty());
 		ret = eval(tree[index].args.front(), tree, stack);
 		stack.push_back(NamedValue{ .name = nullidx, .val = ret });
@@ -1527,8 +1514,6 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 	}
 
 	assert(ASTRETURN_NONE != ret.type);
-	if (!ret.incoh)
-		tree[index].rtype = ret.type;
 
 	// check if node can be collapsed into a literal; not for root or init-statements
 	if (index && !tree[index].isInitialize() && ret.literal && !ret.sidefx) {
@@ -1541,6 +1526,10 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			break;
 		}
 	}
+	else
+	if (!ret.incoh)
+		tree[index].rtype = ret.type;
+
 	return ret;
 }
 
