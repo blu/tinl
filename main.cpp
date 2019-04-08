@@ -1368,6 +1368,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 	assert(nullidx != index && index < tree.size());
 	const size_t stackRestore = stack.size();
 	Value ret{ .type = ASTRETURN_NONE };
+	bool obsolete = false;
 
 	switch (tree[index].type) {
 	case ASTNODE_LET:
@@ -1432,7 +1433,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			{
 				assert(3 == tree[index].args.size());
 				ret = eval(tree[index].args[0], tree, stack);
-				const bool literal = ret.literal;
+				const bool literal = obsolete = ret.literal;
 				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32) ? 1 : 2;
 
 				// next eval may inline, replacing the original node branched to with a new node
@@ -1448,7 +1449,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			{
 				assert(3 == tree[index].args.size());
 				ret = eval(tree[index].args[0], tree, stack);
-				const bool literal = ret.literal;
+				const bool literal = obsolete = ret.literal;
 				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32) ? 1 : 2;
 
 				// next eval may inline, replacing the original node branched to with a new node
@@ -1514,6 +1515,10 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 	}
 
 	assert(ASTRETURN_NONE != ret.type);
+
+	// skip further optimisations if node was optimised out
+	if (obsolete)
+		return ret;
 
 	// check if node can be collapsed into a literal; not for root or init-statements
 	if (index && !tree[index].isInitialize() && ret.literal && !ret.sidefx) {
