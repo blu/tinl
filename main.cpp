@@ -1363,12 +1363,45 @@ void replaceChild(const ASTNodeIndex oldIdx, const ASTNodeIndex newIdx, const AS
 	*it = newIdx;
 }
 
+template < bool PREDOP_I32(int32_t, int32_t), bool PREDOP_F32(float, float) >
+Value evalIf(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
+{
+	assert(3 == tree[index].args.size());
+	Value ret = eval(tree[index].args[0], tree, stack);
+	const bool literal = ret.literal;
+	const bool sidefx = ret.sidefx;
+	const size_t branch = (ASTRETURN_F32 == ret.type ? PREDOP_F32(0.f, ret.f32) : PREDOP_I32(0, ret.i32)) ? 1 : 2;
+
+	// next eval may inline, replacing the original node branched to with a new node
+	ret = eval(tree[index].args[branch], tree, stack);
+	ret.literal &= literal;
+	ret.sidefx |= sidefx;
+	ret.incoh |= !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
+
+	if (literal) {
+		if (sidefx) {
+			ASTNode let = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent };
+			let.args.push_back(tree[index].args[0]);
+			let.args.push_back(tree[index].args[branch]);
+			tree[index] = let;
+		}
+		else
+			replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
+	}
+	return ret;
+}
+
+template < typename T >
+bool predop_eq(T a, T b) { return a == b; }
+
+template < typename T >
+bool predop_gt(T a, T b) { return a > b; }
+
 Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 {
 	assert(nullidx != index && index < tree.size());
 	const size_t stackRestore = stack.size();
 	Value ret{ .type = ASTRETURN_NONE };
-	bool obsolete = false;
 
 	switch (tree[index].type) {
 	case ASTNODE_LET:
@@ -1430,37 +1463,11 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 			ret = evalArith< binop_div< int32_t >, binop_div< float > >(index, tree, stack);
 			break;
 		case INTRIN_IFZERO:
-			{
-				assert(3 == tree[index].args.size());
-				ret = eval(tree[index].args[0], tree, stack);
-				const bool literal = obsolete = ret.literal;
-				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f == ret.f32 : 0 == ret.i32) ? 1 : 2;
-
-				// next eval may inline, replacing the original node branched to with a new node
-				ret = eval(tree[index].args[branch], tree, stack);
-				ret.literal &= literal;
-				ret.incoh = !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
-
-				if (literal)
-					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
-				break;
-			}
+			ret = evalIf< predop_eq< int32_t >, predop_eq< float > >(index, tree, stack);
+			break;
 		case INTRIN_IFNEG:
-			{
-				assert(3 == tree[index].args.size());
-				ret = eval(tree[index].args[0], tree, stack);
-				const bool literal = obsolete = ret.literal;
-				const size_t branch = (ASTRETURN_F32 == ret.type ? 0.f > ret.f32 : 0 > ret.i32) ? 1 : 2;
-
-				// next eval may inline, replacing the original node branched to with a new node
-				ret = eval(tree[index].args[branch], tree, stack);
-				ret.literal &= literal;
-				ret.incoh = !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
-
-				if (literal)
-					replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
-				break;
-			}
+			ret = evalIf< predop_gt< int32_t >, predop_gt< float > >(index, tree, stack);
+			break;
 		case INTRIN_PRINT:
 			assert(1 == tree[index].args.size());
 			ret = eval(tree[index].args[0], tree, stack);
@@ -1481,7 +1488,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 		default:
 			{
 				// inline the target defun as a let-expression
-				ASTNode newnode = { .name = { .ptr = nullptr, .len = 0 }, .rtype = tree[index].rtype, .type = ASTNODE_LET, .parent = tree[index].parent };
+				ASTNode newnode = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent };
 
 				const ASTNodeIndex newnodeIdx = tree.size();
 				tree.push_back(newnode);
@@ -1516,10 +1523,6 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 
 	assert(ASTRETURN_NONE != ret.type);
 
-	// skip further optimisations if node was optimised out
-	if (obsolete)
-		return ret;
-
 	// check if node can be collapsed into a literal; not for root or init-statements
 	if (index && !tree[index].isInitialize() && ret.literal && !ret.sidefx) {
 		switch (ret.type) {
@@ -1532,8 +1535,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 		}
 	}
 	else
-	if (!ret.incoh)
-		tree[index].rtype = ret.type;
+		tree[index].rtype = ret.incoh ? ASTRETURN_UNKNOWN : ret.type;
 
 	return ret;
 }
