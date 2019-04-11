@@ -1379,12 +1379,8 @@ Value evalIf(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 	ret.incoh |= !literal && tree[tree[index].args[1]].rtype != tree[tree[index].args[2]].rtype;
 
 	if (literal) {
-		if (sidefx) {
-			ASTNode let = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent };
-			let.args.push_back(tree[index].args[0]);
-			let.args.push_back(tree[index].args[branch]);
-			tree[index] = let;
-		}
+		if (sidefx)
+			tree[index] = ASTNode{ .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent, .args = { tree[index].args[0], tree[index].args[branch] } };
 		else
 			replaceChild(index, tree[index].args[branch], tree[index].parent, tree);
 	}
@@ -1488,7 +1484,7 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 		default:
 			{
 				// inline the target defun as a let-expression
-				ASTNode newnode = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent };
+				ASTNode newnode = { .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = tree[index].parent };
 
 				const ASTNodeIndex newnodeIdx = tree.size();
 				tree.push_back(newnode);
@@ -1579,7 +1575,7 @@ int main(int argc, char** argv)
 
 #endif
 	ASTNodes tree;
-	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
+	const ASTNode root = { .rtype = ASTRETURN_NONE, .type = ASTNODE_LET, .parent = nullidx };
 	tree.push_back(root);
 
 	// collect top-level expressions/statements, registering them as root sub-nodes
