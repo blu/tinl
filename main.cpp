@@ -789,7 +789,7 @@ ASTNodeIndex checkKnownVar(
 	assert(parent < tree.size());
 
 	// if parent node is an init-statement then backtrack out of its parent let-expression, avoiding
-	// matches to siblings originating from the same let-expression, as well as self matches
+	// matches to siblings originating from the same let-expression
 	if (ASTNODE_INIT == tree[parent].type) {
 		parent = tree[parent].parent;
 		assert(nullidx != parent && parent < tree.size());
