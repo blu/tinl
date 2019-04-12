@@ -1412,7 +1412,7 @@ int main(int argc, char** argv)
 
 #endif
 	ASTNodes tree;
-	const ASTNode root = { .name = { .ptr = nullptr, .len = 0 }, .type = ASTNODE_LET, .parent = nullidx, .args = ASTNodeIndices() };
+	const ASTNode root = { .type = ASTNODE_LET, .parent = nullidx };
 	tree.push_back(root);
 
 	// collect top-level expressions/statements, registering them as root sub-nodes
