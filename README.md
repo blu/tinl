@@ -63,7 +63,7 @@ Benchmarks
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
 | MediaTek MT8163A (Cortex-A53 @ 1.5 GHz)           |  0.795s         |  6.312s         | clang++-3.9, aarch64 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  0.627s         |  5.299s         | g++-8.2, aarch64     |
-| MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.259s         |  2.150s         | g++-8.2, aarch64     |
+| MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.259s         |  2.123s         | g++-8.2 8.3, aarch64 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  0.766s         |  6.090s         | clang++-7.0, aarch32 |
 | MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.286s         |  2.349s         | clang++-7.0, aarch32 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  0.622s         |  5.370s         | g++-8.2, aarch32     |
@@ -79,7 +79,7 @@ Benchmarks
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
 | MediaTek MT8163A (Cortex-A53 @ 1.5 GHz)           |  1.1925         |  9.4680         | clang++-3.9, aarch64 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  1.0659         |  9.0083         | g++-8.2, aarch64     |
-| MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.5439         |  4.5150         | g++-8.2, aarch64     |
+| MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.5439         |  4.4583         | g++-8.2 8.3, aarch64 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  1.3022         | 10.3530         | clang++-7.0, aarch32 |
 | MediaTek MT8173C (Cortex-A72 @ 2.1 GHz)           |  0.6006         |  4.9329         | clang++-7.0, aarch32 |
 | MediaTek MT8173C (Cortex-A53 @ 1.7 GHz)           |  1.0574         |  9.1290         | g++-8.2, aarch32     |
@@ -216,13 +216,14 @@ user    0m0.250s
 sys     0m0.000s
 $ echo "scale=4; 0.259 * 2.1" | bc
 .5439
+$ g++-8.3 main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8-a -DNDEBUG && strip ./test
 $ time taskset 0xc ./test bench_fib.tinl > /dev/null
 
-real    0m2.150s
-user    0m2.140s
-sys     0m0.000s
-$ echo "scale=4; 2.150 * 2.1" | bc
-4.5150
+real    0m2.123s
+user    0m2.108s
+sys     0m0.004s
+$ echo "scale=4; 2.123 * 2.1" | bc
+4.4583
 ```
 
 Intel Xeon E5-2687W (Sandy Bridge @ 3.1GHz, amd64)
