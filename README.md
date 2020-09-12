@@ -74,6 +74,7 @@ Benchmarks
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.699s         |  5.670s         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.307s         |  3.371s         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.450s         |  3.866s         | g++-8.2, aarch64     |
+| Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.250s         |  1.997s         | g++-8.4, aarch64     |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -90,6 +91,7 @@ Benchmarks
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.8388         |  6.8040         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.6140         |  6.7420         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.6426         |  5.5206         | g++-8.2, aarch64     |
+| Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.6500         |  5.1922         | g++-8.4, aarch64     |
 
 Logs
 ----
@@ -339,4 +341,23 @@ user    0m3,856s
 sys     0m0,000s
 $ echo "scale=4; 3.866 * 1.428" | bc
 5.5206
+```
+
+Snapdragon 835
+```
+$ g++-8.4 main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8-a -DNDEBUG && strip ./test
+$ time ./test bench_fac.tinl > /dev/null
+
+real    0m0.250s
+user    0m0.234s
+sys     0m0.016s
+$ echo "scale=4; 0.250 * 2.6" | bc
+.6500
+$ time ./test bench_fib.tinl > /dev/null
+
+real    0m1.997s
+user    0m1.938s
+sys     0m0.063s
+$ echo "scale=4; 1.997 * 2.6" | bc
+5.1922
 ```
