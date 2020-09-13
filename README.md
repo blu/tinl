@@ -75,6 +75,7 @@ Benchmarks
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.307s         |  3.371s         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.450s         |  3.866s         | g++-8.2, aarch64     |
 | Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.250s         |  1.997s         | g++-8.4, aarch64     |
+| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.154s         |  1.049s         | g++-9.4, aarch64     |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -92,6 +93,7 @@ Benchmarks
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.6140         |  6.7420         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.6426         |  5.5206         | g++-8.2, aarch64     |
 | Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.6500         |  5.1922         | g++-8.4, aarch64     |
+| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.4620         |  3.1470         | g++-9.4, aarch64     |
 
 Logs
 ----
@@ -360,4 +362,23 @@ user    0m1.938s
 sys     0m0.063s
 $ echo "scale=4; 1.997 * 2.6" | bc
 5.1922
+```
+
+Snapdragon SQ1
+```
+$ g++-9.4 main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8.2-a -mtune=cortex-a76 -DNDEBUG && strip ./test
+$ time ./test bench_fac.tinl > /dev/null
+
+real    0m0.154s
+user    0m0.144s
+sys     0m0.010s
+$ echo "scale=4; 0.154 * 3.0" | bc
+.4620
+$ time ./test bench_fib.tinl > /dev/null
+
+real    0m1.049s
+user    0m1.045s
+sys     0m0.006s
+$ echo "scale=4; 1.049 * 3.0" | bc
+3.1470
 ```
