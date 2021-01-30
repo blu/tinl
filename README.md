@@ -74,8 +74,9 @@ Benchmarks
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.699s         |  5.670s         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.307s         |  3.371s         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.450s         |  3.866s         | g++-8.2, aarch64     |
-| Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.250s         |  1.997s         | g++-8.4, aarch64     |
+| Snapdragon 835 (Cortex-A73 @ 2.55GHz)             |  0.250s         |  1.997s         | g++-8.4, aarch64     |
 | Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.154s         |  1.049s         | g++-9.4, aarch64     |
+| Apple M1 (Firestorm @ 3.2GHz)                     |  0.080s         |  0.590s         | g++-11.0, aarch64    |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -92,8 +93,9 @@ Benchmarks
 | Baikal-T1 (P5600 @ 1.2 GHz)                       |  0.8388         |  6.8040         | g++-8.3, mips32r5    |
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.6140         |  6.7420         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.6426         |  5.5206         | g++-8.2, aarch64     |
-| Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.6500         |  5.1922         | g++-8.4, aarch64     |
+| Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.6375         |  5.0923         | g++-8.4, aarch64     |
 | Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.4620         |  3.1470         | g++-9.4, aarch64     |
+| Apple M1 (Firestorm @ 3.2GHz)                     |  0.2560         |  1.8880         | g++-11.0, aarch64    |
 
 Logs
 ----
@@ -353,15 +355,15 @@ $ time ./test bench_fac.tinl > /dev/null
 real    0m0.250s
 user    0m0.234s
 sys     0m0.016s
-$ echo "scale=4; 0.250 * 2.6" | bc
-.6500
+$ echo "scale=4; 0.250 * 2.55" | bc
+.6375
 $ time ./test bench_fib.tinl > /dev/null
 
 real    0m1.997s
 user    0m1.938s
 sys     0m0.063s
-$ echo "scale=4; 1.997 * 2.6" | bc
-5.1922
+$ echo "scale=4; 1.997 * 2.55" | bc
+5.0923
 ```
 
 Snapdragon SQ1
@@ -381,4 +383,21 @@ user    0m1.045s
 sys     0m0.006s
 $ echo "scale=4; 1.049 * 3.0" | bc
 3.1470
+```
+
+Apple M1
+```
+% xcrun g++-11.0-mp-devel main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8-a -DNDEBUG
+% /usr/bin/time -p ./test bench_fac.tinl > /dev/null
+real         0.08
+user         0.08
+sys          0.00
+% echo "scale=4; 0.08 * 3.2" | bc
+.256
+% /usr/bin/time -p ./test bench_fib.tinl > /dev/null
+real         0.59
+user         0.58
+sys          0.00
+% echo "scale=4; 0.59 * 3.2" | bc
+1.888
 ```
