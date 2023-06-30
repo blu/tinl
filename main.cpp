@@ -38,7 +38,7 @@ const char separators[] = {
 	'\n' // keep new-line separator last
 };
 
-// tokens represent all known lexical categries -- keywords, literals and identifiers, plus the 'unknown' category
+// tokens represent all known lexical categories -- keywords, literals and identifiers, plus the 'unknown' category
 enum Token : uint16_t { // keep order in sync with keywords above to maintain a mapping shortcut
 	TOKEN_UNKNOWN,
 	// keywords
