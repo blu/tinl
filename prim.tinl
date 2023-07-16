@@ -1,0 +1,40 @@
+(defun rem(a b)
+	(- a (* b (/ a b)))
+)
+
+(defun zequ(a b)
+	(- a b)
+)
+
+(defun deepdiv(num f)
+	(ifzero (rem num f)
+		(deepdiv (/ num f) (print f))
+		num
+	)
+) 
+
+(defun factor5(num f0 f1 f2 f3 f4)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(let ((quotient1 (deepdiv quotient0 f1)))
+				(ifzero (zequ quotient1 1) 1
+					(let ((quotient2 (deepdiv quotient1 f2)))
+						(ifzero (zequ quotient2 1) 1
+							(let ((quotient3 (deepdiv quotient2 f3)))
+								(ifzero (zequ quotient3 1) 1
+									(let ((quotient4 (deepdiv quotient3 f4)))
+										(ifzero (zequ quotient4 1) 1
+											(print quotient4)
+										)
+									)
+								)
+							)
+						)
+					)
+				)
+			)
+		)
+	)
+)
+
+(factor5 (readi32) 2 3 5 7 11)
