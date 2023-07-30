@@ -1207,6 +1207,7 @@ void Value::print(FILE* f) const
 {
 	fprintf(f, "%s", stringFromReturnType(type));
 
+#if 0
 	if (literal)
 		fprintf(f, " \033[38;5;14m" "lit" "\033[0m");
 
@@ -1216,6 +1217,7 @@ void Value::print(FILE* f) const
 	if (incoh)
 		fprintf(f, " \033[38;5;9m" "inc" "\033[0m");
 
+#endif
 	switch (type) {
 	case ASTRETURN_I32:
 		fprintf(f, " %d\n", i32);
@@ -1437,6 +1439,10 @@ Value eval(const ASTNodeIndex index, ASTNodes& tree, VarStack& stack)
 		assert(!tree[index].args.empty());
 		ret = eval(tree[index].args.front(), tree, stack);
 		stack.push_back(NamedValue{ .name = nullidx, .val = ret });
+		// stack is a sidefx terminator -- values that end up on the stack lose sidefx
+		stack.back().val.sidefx = false;
+		// same goes for type incoherence
+		stack.back().val.incoh = false;
 		break;
 	case ASTNODE_EVAL_VAR:
 		{

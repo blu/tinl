@@ -82,7 +82,7 @@ success
 2
 3
 5
-i32 lit sid 5
+i32 5
 ASTNODE_LET: unknown fib
   ASTNODE_INIT: unknown x (2)
   ASTNODE_INIT: unknown y (3)
@@ -165,7 +165,7 @@ ASTNODE_EVAL_FUN: unknown fib
   ASTNODE_LITERAL: i32 1
   ASTNODE_LITERAL: i32 3
 success
-i32 lit 5
+i32 5
 ASTNODE_LET: unknown fib
   ASTNODE_INIT: unknown x (2)
   ASTNODE_INIT: unknown y (3)

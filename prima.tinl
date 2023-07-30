@@ -53,4 +53,44 @@
 	)
 )
 
-(factor5 (readi32) 2 3 5 7 11)
+(defun factor6(num f0 f1 f2 f3 f4 f5)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(factor5 quotient0 f1 f2 f3 f4 f5)
+		)
+	)
+)
+
+(defun factor7(num f0 f1 f2 f3 f4 f5 f6)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(factor6 quotient0 f1 f2 f3 f4 f5 f6)
+		)
+	)
+)
+
+(defun factor8(num f0 f1 f2 f3 f4 f5 f6 f7)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(factor7 quotient0 f1 f2 f3 f4 f5 f6 f7)
+		)
+	)
+)
+
+(defun factor9(num f0 f1 f2 f3 f4 f5 f6 f7 f8)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(factor8 quotient0 f1 f2 f3 f4 f5 f6 f7 f8)
+		)
+	)
+)
+
+(defun factor10(num f0 f1 f2 f3 f4 f5 f6 f7 f8 f9)
+	(let ((quotient0 (deepdiv num f0)))
+		(ifzero (zequ quotient0 1) 1
+			(factor9 quotient0 f1 f2 f3 f4 f5 f6 f7 f8 f9)
+		)
+	)
+)
+
+(factor10 (readi32) 2 3 5 7 11 13 17 19 23 29)
