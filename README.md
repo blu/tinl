@@ -45,15 +45,15 @@ Print `n + 2` consecutive members of the Fibonacci sequence. Maximum code likene
 Common LISP:
 
 ```lisp
-	(defun fib(x y n)
-		(print x) (if (zerop n) (print y) (fib y (+ x y) (- n 1))))
+    (defun fib(x y n)
+        (print x) (if (zerop n) (print y) (fib y (+ x y) (- n 1))))
 ```
 
 TINL:
 
 ```lisp
-	(defun fib(x y n)
-		(print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
+    (defun fib(x y n)
+        (print x) (ifzero n (print y) (fib y (+ x y) (- n 1))))
 ```
 
 Benchmarks
@@ -75,8 +75,9 @@ Benchmarks
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.307s         |  3.371s         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.450s         |  3.866s         | g++-8.2, aarch64     |
 | Snapdragon 835 (Cortex-A73 @ 2.55GHz)             |  0.250s         |  1.997s         | g++-8.4, aarch64     |
-| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.154s         |  1.049s         | g++-9.4, aarch64     |
+| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.137s         |  0.990s         | g++-10.3, aarch64    |
 | Apple M1 (Firestorm @ 3.2GHz)                     |  0.080s         |  0.590s         | g++-11.0, aarch64    |
+| BCM2712 (Cortex-A76 @ 2.4GHz)                     |  0.132s         |  1.073s         | g++-12.2, aarch64    |
 
 | CPU                                               | factorial, Gclk | fibonacci, Gclk | remarks              |
 | ------------------------------------------------- | --------------- | --------------- | -------------------- |
@@ -94,8 +95,9 @@ Benchmarks
 | Exynos 5422 (Cortex-A15 @ 2.0 GHz)                |  0.6140         |  6.7420         | g++-8.3, armv7l      |
 | Tegra X1 (Cortex-A57 @ 1.428 GHz)                 |  0.6426         |  5.5206         | g++-8.2, aarch64     |
 | Snapdragon 835 (Cortex-A73 @ 2.6GHz)              |  0.6375         |  5.0923         | g++-8.4, aarch64     |
-| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.4620         |  3.1470         | g++-9.4, aarch64     |
+| Snapdragon SQ1 (Cortex-A76 @ 3.0GHz)              |  0.4110         |  2.9700         | g++-10.3, aarch64    |
 | Apple M1 (Firestorm @ 3.2GHz)                     |  0.2560         |  1.8880         | g++-11.0, aarch64    |
+| BCM2712 (Cortex-A76 @ 2.4GHz)                     |  0.3168         |  2.5752         | g++-12.2, aarch64    |
 
 Logs
 ----
@@ -368,21 +370,21 @@ $ echo "scale=4; 1.997 * 2.55" | bc
 
 Snapdragon SQ1
 ```
-$ g++-9.4 main.cpp -o test -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8.2-a -mtune=cortex-a76 -DNDEBUG && strip ./test
-$ time ./test bench_fac.tinl > /dev/null
+$ g++-10 main.cpp -o tinl.tco -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8.2-a -mtune=cortex-a76 -DNDEBUG && strip ./tinl.tco
+$ time ./tinl.tco bench_fac.tinl > /dev/null
 
-real    0m0.154s
-user    0m0.144s
-sys     0m0.010s
-$ echo "scale=4; 0.154 * 3.0" | bc
-.4620
-$ time ./test bench_fib.tinl > /dev/null
+real    0m0.137s
+user    0m0.109s
+sys     0m0.000s
+$ echo "scale=4; 0.137 * 3.0" | bc
+.4110
+$ time ./tinl.tco bench_fib.tinl > /dev/null
 
-real    0m1.049s
-user    0m1.045s
-sys     0m0.006s
-$ echo "scale=4; 1.049 * 3.0" | bc
-3.1470
+real    0m0.990s
+user    0m0.953s
+sys     0m0.031s
+$ echo "scale=4; 0.990 * 3.0" | bc
+2.9700
 ```
 
 Apple M1
@@ -400,4 +402,23 @@ user         0.58
 sys          0.00
 % echo "scale=4; 0.59 * 3.2" | bc
 1.888
+```
+
+BCM2712
+```
+$ g++-12 main.cpp -o tinl.tco -Wno-div-by-zero -Wno-switch -Wno-format-security -Ofast -fno-exceptions -fno-rtti -fstrict-aliasing -march=armv8.2-a -mtune=cortex-a76 -DNDEBUG && strip ./tinl.tco
+$ time ./tinl.tco bench_fac.tinl > /dev/null
+
+real    0m0.132s
+user    0m0.129s
+sys     0m0.004s
+$ echo "scale=4; 0.132 * 2.4" | bc
+.3168
+$ time ./tinl.tco bench_fib.tinl > /dev/null
+
+real    0m1.073s
+user    0m1.065s
+sys     0m0.008s
+$ echo "scale=4; 1.073 * 2.4" | bc
+2.5752
 ```
