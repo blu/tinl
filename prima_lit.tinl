@@ -11,7 +11,7 @@
 		(deepdiv (/ num f) (print f))
 		num
 	)
-) 
+)
 
 (defun factor1(num f0)
 	(let ((quotient0 (deepdiv num f0)))
