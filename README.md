@@ -26,7 +26,7 @@ Built-in functions
 `ifzero arg1 arg2 arg3` -- if arg1 is zero, compute arg2, otherwise compute arg3  
 `ifneg arg1 arg2 arg3` -- if arg1 is negative, compute arg2, otherwise compute arg3  
 `print arg` -- print arg and return arg; exert side-effect  
-`readi32`, `readf32` -- read a scalar of the respective type from stdin
+`readi32`, `readf32` -- read a scalar of the respective type from stdin; exert side-effect
 
 Interpreter considerations
 --------------------------
