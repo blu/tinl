@@ -1,0 +1,11 @@
+(defun mod(x y)
+	(- x (* (/ x y) y))
+)
+
+(defun collatz(n)
+	(ifzero (- n 1) (print 1)
+			(ifzero (mod (print n) 2) (collatz (/ n 2)) (collatz (+ (* 3 n) 1)))
+	)
+)
+
+(collatz (readi32))
